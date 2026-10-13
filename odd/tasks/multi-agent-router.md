@@ -64,3 +64,11 @@ T2: package as Claude Code plugin.
 - Finding: agy in `-p` runs shell commands autonomously (ran `./bin/ask-agent status`, `agy -p /usage`) in plan mode and default mode alike; `--mode plan` does not make it read-only. Two runs hit 10m/5m timeouts with empty response.
 - Fix: recursion guard via `ASK_AGENT_DEPTH`; global `prompt_preamble` (read-only, no commands, concise); dropped `--mode plan` for agy. Third run answered in 8m, no files changed.
 - agy claims verified on bash 3.2.57: #1 empty-array/set -u FALSE, #2 readlink -f FALSE on this macOS (hardened with perl abs_path anyway), #3 missing `alarm 0` TRUE (fixed), #4 cooldown race in parallel TRUE (20 writers: 4/20 kept without lock, 20/20 with mkdir lock), #5 invalid agent ignored TRUE (agy's proposed fix also wrong: validation moved to parse_args in main shell), #6 model word splitting FALSE.
+
+## codex live + second review (codex-thinker subagent end to end)
+- ChatGPT quota restored: `ask-agent -a codex` -> `CODEX_OK` in 7s; `-a gentle-shell` -> `GS_OK` in 15s.
+- Plugin end to end: `multi-agent-router:codex-thinker` subagent relayed a review of bin/ask-agent to codex; answer in 42s total.
+- codex claims verified: #1 lock stolen after 5s TRUE, #2 unguarded cooldown init TRUE, #3 reset bypassed lock TRUE, #4 cross-filesystem mv NOT APPLICABLE here (same disk3s5; hardened anyway, temp files in STATE_DIR), #5 agy missing `.response` printed `null` as success TRUE, #6 opencode error event ignored PLAUSIBLE (not reproduced; covered).
+- Fixes: noclobber init, lock broken only when >30s old and live lock waited 10s then write skipped, reset under lock, `.response // empty`, opencode error events fail the run, set_cooldown no longer logs success when the lock is skipped (found while testing).
+- Verified: 20/20 concurrent writes, stale lock broken, live lock respected, reset one/all, opencode and codex still answer, plugin validate + test pass.
+- Comparison: agy 3/6 true in 8m; codex 5/6 true (1 n/a) in 42s.

@@ -28,7 +28,8 @@ export ASK_AGENT_DEPTH=1
 command -v jq >/dev/null || die "jq is required"
 [[ -f "$CONFIG" ]] || die "config not found: $CONFIG"
 mkdir -p "$STATE_DIR"
-[[ -f "$COOLDOWN_FILE" ]] || echo '{}' >"$COOLDOWN_FILE"
+# noclobber creates the file with O_EXCL, so concurrent first runs cannot erase each other.
+[[ -f "$COOLDOWN_FILE" ]] || (set -C; echo '{}' >"$COOLDOWN_FILE") 2>/dev/null
 
 cfg() { jq -r "$1" "$CONFIG"; }
 agent_cfg() { jq -r --arg a "$1" ".agents[\$a]$2" "$CONFIG"; }
@@ -38,11 +39,19 @@ now() { date +%s; }
 
 cooldown_until() { jq -r --arg a "$1" '.[$a] // 0' "$COOLDOWN_FILE"; }
 
-# mkdir is atomic: serializes cooldown writes from parallel attempts.
+# mkdir is atomic: serializes cooldown writes from parallel attempts. A lock is
+# only broken when it is older than 30s (its holder died); a live one is waited
+# on for up to 10s and then the write is skipped rather than raced.
 with_lock() {
-  local lock="$COOLDOWN_FILE.lock" tries=0
+  local lock="$COOLDOWN_FILE.lock" tries=0 age
   until mkdir "$lock" 2>/dev/null; do
-    ((++tries > 50)) && { log "cooldown lock busy, removing stale lock"; rmdir "$lock" 2>/dev/null; }
+    age="$(perl -e 'my @s = stat shift; print @s ? time - $s[9] : 0' "$lock")"
+    if ((age > 30)); then
+      log "removing stale cooldown lock (${age}s old)"
+      rmdir "$lock" 2>/dev/null
+      continue
+    fi
+    ((++tries > 100)) && { log "cooldown lock busy, skipping write"; return 1; }
     perl -e 'select(undef, undef, undef, 0.1)'
   done
   "$@"
@@ -53,7 +62,7 @@ with_lock() {
 
 write_cooldown() {
   local tmp
-  tmp="$(mktemp)"
+  tmp="$(mktemp "$STATE_DIR/cooldown.XXXXXX")"
   jq --arg a "$1" --argjson u "$2" '.[$a] = $u' "$COOLDOWN_FILE" >"$tmp" && mv "$tmp" "$COOLDOWN_FILE"
 }
 
@@ -63,9 +72,11 @@ set_cooldown() {
   log "$agent cooled down until $(date -r "$until" '+%Y-%m-%d %H:%M')"
 }
 
-clear_cooldown() {
+clear_cooldown() { with_lock reset_cooldown "${1:-}"; }
+
+reset_cooldown() {
   local tmp
-  tmp="$(mktemp)"
+  tmp="$(mktemp "$STATE_DIR/cooldown.XXXXXX")"
   if [[ -n "${1:-}" ]]; then
     jq --arg a "$1" 'del(.[$a])' "$COOLDOWN_FILE" >"$tmp"
   else
@@ -167,13 +178,15 @@ run_agent() {
         ${model:+--model "$model"} ${args[@]+"${args[@]}"} 2>"$err")"
       rc=$?
       answer=""
-      [[ "$(jq -r '.status // empty' <<<"$out" 2>/dev/null)" == "SUCCESS" ]] && answer="$(jq -r '.response' <<<"$out")"
+      [[ "$(jq -r '.status // empty' <<<"$out" 2>/dev/null)" == "SUCCESS" ]] && answer="$(jq -r '.response // empty' <<<"$out")"
       ;;
     opencode)
       out="$(with_timeout "$secs" "$cmd" run --format json ${model:+-m "$model"} ${args[@]+"${args[@]}"} \
         "$prompt" 2>"$err")"
       rc=$?
       answer="$(jq -rj 'select(.type == "text") | .part.text // empty' <<<"$out" 2>/dev/null)"
+      # An error event anywhere in the stream means the run failed, text or not.
+      jq -e 'select(.type == "error")' <<<"$out" >/dev/null 2>&1 && answer=""
       ;;
     gentle-shell)
       out="$(with_timeout "$secs" "$cmd" -- -p --no-session ${model:+--model "$model"} ${args[@]+"${args[@]}"} \

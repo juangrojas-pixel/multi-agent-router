@@ -15,7 +15,7 @@ Let Claude Code delegate prompts to other agent CLIs (agy, opencode, gentle-shel
 
 ## Tasks
 - [x] T1 Router script + config, verified against live agy and opencode (route: inline, single mechanical script)
-- [ ] T2 Plugin packaging: manifest, subagents, delegate skill, local marketplace install
+- [x] T2 Plugin packaging: manifest, subagents, delegate skill, local marketplace install (route: inline; prose/config files already designed)
 
 ## Acceptance
 - `ask-agent status` shows availability and agy quota.
@@ -52,3 +52,10 @@ T2: package as Claude Code plugin.
 - `ask-agent parallel` runs every ready agent concurrently and prints `### agent` sections.
 - Verified: status shows tiers; draft -> opencode `DRAFT_OK`; codex quota error detected in 5s (was 12s via gentle-shell, no setup noise); parallel agy+opencode answered in ~18s; think tier skipped cooled-down codex and agy answered `THINK_OK`.
 - Not verified: codex successful answer (ChatGPT quota exhausted 2026-10-12).
+
+## Verification (T2)
+- `claude plugin validate .`: passed (hooks session.start, prompt.compose; calls $.process.run, $.ui.log, $.ui.status).
+- `claude plugin test .`: 1 pass (policy section appended last, scope session).
+- Installed: `multi-agent-router@multi-agent-router`, scope user, read from repo folder, enabled.
+- Bug found and fixed: ask-agent via ~/.local/bin symlink resolved ROOT to ~/.local; now resolves with `readlink -f`.
+- Not verified yet: hook running in a live session (needs `/reload-plugins` or new session), subagents end to end.

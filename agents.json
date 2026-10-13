@@ -1,29 +1,35 @@
 {
-  "chain": ["agy", "opencode", "gentle-shell"],
+  "chain": [
+    "agy",
+    "opencode",
+    "gentle-shell"
+  ],
   "cooldown_seconds": 3600,
   "agents": {
     "agy": {
       "enabled": true,
       "command": "agy",
       "model": null,
-      "timeout": "600s",
       "extra_args": [],
       "quota": {
         "group": "Gemini Models",
         "min_remaining": 0.10
-      }
+      },
+      "timeout_seconds": 600
     },
     "opencode": {
       "enabled": true,
       "command": "opencode",
       "model": "opencode/big-pickle",
-      "extra_args": []
+      "extra_args": [],
+      "timeout_seconds": 300
     },
     "gentle-shell": {
-      "enabled": false,
+      "enabled": true,
       "command": "gentle-shell",
       "model": null,
-      "extra_args": []
+      "extra_args": [],
+      "timeout_seconds": 600
     }
   }
 }

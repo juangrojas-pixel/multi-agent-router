@@ -36,3 +36,11 @@ Let Claude Code delegate prompts to other agent CLIs (agy, opencode, gentle-shel
 
 ## Next step
 T2: package as Claude Code plugin.
+
+## Fixes after T1 (gentle-shell enabled)
+- Enabled gentle-shell (default model openai-codex/gpt-6.1-sol via ChatGPT subscription).
+- Bug: `run_agent` clobbered caller loop var `a` (bash dynamic scope) -> cooldown saved under empty name. Fixed with `local arg`.
+- Bug: agents could hang forever (pi waited on stdin; wrapper node -> pi child survived kill). Added `with_timeout`: own process group, stdin </dev/null, TERM/KILL whole group, exit 142. Per-agent `timeout_seconds`.
+- Verified: real quota error from gentle-shell ("Codex error: The usage limit has been reached") detected in ~12s, cooldown keyed correctly, no orphans.
+- Verified: fake agent with background child killed after 3s, child gone.
+- Observed (not ours to fix here): gentle-shell auto-setup fails on rollback snapshot restore; it continues anyway.

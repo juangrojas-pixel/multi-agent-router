@@ -92,20 +92,39 @@ check_agent() {
 
 # --- invocation -------------------------------------------------------------
 
+# Runs a command with a hard time limit (macOS has no coreutils `timeout`).
+# The command gets its own process group so wrapper CLIs (node -> pi) are
+# killed together with their children; exits 142 on expiry.
+with_timeout() {
+  local secs="$1"; shift
+  perl -e '
+    my $secs = shift;
+    my $pid = fork() // die "fork failed: $!";
+    if ($pid == 0) { setpgrp(0, 0); open(STDIN, "<", "/dev/null"); exec @ARGV or die "exec failed: $!"; }
+    local $SIG{ALRM} = sub {
+      kill "TERM", -$pid; sleep 2; kill "KILL", -$pid;
+      waitpid($pid, 0); exit 142;
+    };
+    alarm $secs;
+    waitpid($pid, 0);
+    exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
+  ' "$secs" "$@"
+}
+
 # Runs the agent; answer on stdout. Exit 0 ok, 3 quota error, 1 other failure.
 run_agent() {
   local agent="$1" prompt="$2" model="$3" cmd out err rc
   cmd="$(agent_cfg "$agent" .command)"
   [[ -n "$model" ]] || model="$(agent_cfg "$agent" '.model // empty')"
   local -a args=()
-  while IFS= read -r a; do [[ -n "$a" ]] && args+=("$a"); done < <(agent_cfg "$agent" '.extra_args[]?')
+  local arg secs
+  secs="$(agent_cfg "$agent" '.timeout_seconds // 600')"
+  while IFS= read -r arg; do [[ -n "$arg" ]] && args+=("$arg"); done < <(agent_cfg "$agent" '.extra_args[]?')
 
   err="$(mktemp)"
   case "$agent" in
     agy)
-      local timeout
-      timeout="$(agent_cfg agy '.timeout // "600s"')"
-      out="$("$cmd" -p "$prompt" --output-format json --print-timeout "$timeout" \
+      out="$(with_timeout "$((secs + 30))" "$cmd" -p "$prompt" --output-format json --print-timeout "${secs}s" \
         ${model:+--model "$model"} ${args[@]+"${args[@]}"} 2>"$err")"
       rc=$?
       if ((rc == 0)) && [[ "$(jq -r '.status // empty' <<<"$out" 2>/dev/null)" == "SUCCESS" ]]; then
@@ -115,7 +134,7 @@ run_agent() {
       out="$out"$'\n'"$(<"$err")"
       ;;
     opencode)
-      out="$("$cmd" run ${model:+-m "$model"} ${args[@]+"${args[@]}"} "$prompt" 2>"$err")"
+      out="$(with_timeout "$secs" "$cmd" run ${model:+-m "$model"} ${args[@]+"${args[@]}"} "$prompt" 2>"$err")"
       rc=$?
       if ((rc == 0)) && [[ -n "$out" ]]; then
         printf '%s\n' "$out"
@@ -124,7 +143,7 @@ run_agent() {
       out="$out"$'\n'"$(<"$err")"
       ;;
     gentle-shell)
-      out="$("$cmd" -- -p --no-session ${model:+--model "$model"} ${args[@]+"${args[@]}"} "$prompt" 2>"$err")"
+      out="$(with_timeout "$secs" "$cmd" -- -p --no-session ${model:+--model "$model"} ${args[@]+"${args[@]}"} "$prompt" 2>"$err")"
       rc=$?
       if ((rc == 0)) && [[ -n "$out" ]]; then
         printf '%s\n' "$out"
@@ -136,6 +155,10 @@ run_agent() {
   esac
   rm -f "$err"
 
+  if ((rc == 142)); then
+    log "$agent timed out after ${secs}s"
+    return 1
+  fi
   if grep -Eqi "$QUOTA_ERROR_RE" <<<"$out"; then
     log "$agent hit a quota/rate limit: $(tail -n 3 <<<"$out" | tr '\n' ' ')"
     return 3

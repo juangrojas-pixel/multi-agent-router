@@ -1,35 +1,47 @@
 {
-  "chain": [
-    "agy",
-    "opencode",
-    "gentle-shell"
-  ],
   "cooldown_seconds": 3600,
+  "default_tier": "execute",
+  "tiers": {
+    "think": ["codex", "agy"],
+    "execute": ["agy", "codex"],
+    "draft": ["opencode", "agy"]
+  },
   "agents": {
+    "codex": {
+      "enabled": true,
+      "description": "GPT via ChatGPT subscription, pi without gentle-ai (no setup, skills, extensions or context files)",
+      "command": "pi",
+      "model": "openai-codex/gpt-6.1-sol",
+      "timeout_seconds": 900,
+      "extra_args": ["--tools", "read,grep,find,ls"]
+    },
     "agy": {
       "enabled": true,
+      "description": "Antigravity CLI (Gemini Pro/Flash, Claude, GPT-OSS on its own quota), plan mode",
       "command": "agy",
       "model": null,
-      "extra_args": [],
+      "timeout_seconds": 600,
+      "extra_args": ["--mode", "plan"],
       "quota": {
         "group": "Gemini Models",
         "min_remaining": 0.10
-      },
-      "timeout_seconds": 600
+      }
     },
     "opencode": {
       "enabled": true,
+      "description": "OpenCode with a free model, read-only plan agent; drafts only",
       "command": "opencode",
       "model": "opencode/big-pickle",
-      "extra_args": [],
-      "timeout_seconds": 300
+      "timeout_seconds": 300,
+      "extra_args": ["--agent", "plan"]
     },
     "gentle-shell": {
       "enabled": true,
+      "description": "Full gentle-ai stack on pi; explicit use only (-a gentle-shell), never in tiers",
       "command": "gentle-shell",
       "model": null,
-      "extra_args": [],
-      "timeout_seconds": 600
+      "timeout_seconds": 900,
+      "extra_args": []
     }
   }
 }

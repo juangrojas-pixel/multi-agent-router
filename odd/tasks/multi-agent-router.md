@@ -44,3 +44,11 @@ T2: package as Claude Code plugin.
 - Verified: real quota error from gentle-shell ("Codex error: The usage limit has been reached") detected in ~12s, cooldown keyed correctly, no orphans.
 - Verified: fake agent with background child killed after 3s, child gone.
 - Observed (not ours to fix here): gentle-shell auto-setup fails on rollback snapshot restore; it continues anyway.
+
+## Router v2: tiers, codex (bare pi), parallel
+- Tiers in agents.json: think [codex, agy], execute [agy, codex], draft [opencode, agy]; gentle-shell explicit only.
+- `codex` = `pi -p --no-session --no-extensions --no-skills --no-context-files --model openai-codex/gpt-6.1-sol --tools read,grep,find,ls` (no gentle-ai setup/orchestrator).
+- Read-only by default: agy `--mode plan`, opencode `--agent plan` + `--format json` (text events parsed), codex tool allowlist.
+- `ask-agent parallel` runs every ready agent concurrently and prints `### agent` sections.
+- Verified: status shows tiers; draft -> opencode `DRAFT_OK`; codex quota error detected in 5s (was 12s via gentle-shell, no setup noise); parallel agy+opencode answered in ~18s; think tier skipped cooled-down codex and agy answered `THINK_OK`.
+- Not verified: codex successful answer (ChatGPT quota exhausted 2026-10-12).

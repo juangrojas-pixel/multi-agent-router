@@ -7,6 +7,8 @@ description: Delegate work to external agent CLIs (codex/pi, agy, opencode, gent
 
 Claude is the orchestrator and the only writer. External agents are read-only advisors whose output is evidence, not truth.
 
+Read-only is enforced by instruction, not by sandbox: agy runs shell commands on its own in `-p` mode, and a thorough review can take 5 to 10 minutes. Delegate from a clean git tree and check `git status` afterwards. `ask-agent` refuses nested calls, so an agent cannot route back into another agent.
+
 ## Pick the tier
 
 | Tier | Agents (in order) | Use for | Never for |

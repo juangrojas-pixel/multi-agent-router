@@ -10,7 +10,7 @@
 # Tiers: think | execute | draft (see agents.json). Prompt is read from stdin if omitted.
 set -uo pipefail
 
-SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+SELF="$(perl -MCwd=abs_path -le 'print abs_path(shift)' "${BASH_SOURCE[0]}")"
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 CONFIG="${ASK_AGENT_CONFIG:-$ROOT/agents.json}"
 STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/multi-agent-router"
@@ -19,6 +19,11 @@ QUOTA_ERROR_RE='rate.?limit|quota|429|resource.?exhausted|usage limit|too many r
 
 log() { printf '[ask-agent] %s\n' "$*" >&2; }
 die() { log "error: $*"; exit 2; }
+
+# Agents run shell commands on their own (agy in -p mode does); refuse nested
+# calls so an agent can never route back into another agent.
+[[ -z "${ASK_AGENT_DEPTH:-}" ]] || die "nested call refused: ask-agent is already running an agent"
+export ASK_AGENT_DEPTH=1
 
 command -v jq >/dev/null || die "jq is required"
 [[ -f "$CONFIG" ]] || die "config not found: $CONFIG"
@@ -33,10 +38,28 @@ now() { date +%s; }
 
 cooldown_until() { jq -r --arg a "$1" '.[$a] // 0' "$COOLDOWN_FILE"; }
 
-set_cooldown() {
-  local agent="$1" until="$2" tmp
+# mkdir is atomic: serializes cooldown writes from parallel attempts.
+with_lock() {
+  local lock="$COOLDOWN_FILE.lock" tries=0
+  until mkdir "$lock" 2>/dev/null; do
+    ((++tries > 50)) && { log "cooldown lock busy, removing stale lock"; rmdir "$lock" 2>/dev/null; }
+    perl -e 'select(undef, undef, undef, 0.1)'
+  done
+  "$@"
+  local rc=$?
+  rmdir "$lock" 2>/dev/null
+  return $rc
+}
+
+write_cooldown() {
+  local tmp
   tmp="$(mktemp)"
-  jq --arg a "$agent" --argjson u "$until" '.[$a] = $u' "$COOLDOWN_FILE" >"$tmp" && mv "$tmp" "$COOLDOWN_FILE"
+  jq --arg a "$1" --argjson u "$2" '.[$a] = $u' "$COOLDOWN_FILE" >"$tmp" && mv "$tmp" "$COOLDOWN_FILE"
+}
+
+set_cooldown() {
+  local agent="$1" until="$2"
+  with_lock write_cooldown "$agent" "$until"
   log "$agent cooled down until $(date -r "$until" '+%Y-%m-%d %H:%M')"
 }
 
@@ -68,6 +91,7 @@ with_timeout() {
     };
     alarm $secs;
     waitpid($pid, 0);
+    alarm 0;
     exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
   ' "$secs" "$@"
 }
@@ -124,6 +148,9 @@ run_agent() {
   cmd="$(agent_cfg "$agent" .command)"
   [[ -n "$model" ]] || model="$(agent_cfg "$agent" '.model // empty')"
   secs="$(agent_cfg "$agent" '.timeout_seconds // 600')"
+  local preamble
+  preamble="$(cfg '.prompt_preamble // empty')"
+  [[ -z "$preamble" ]] || prompt="$preamble"$'\n\n'"$prompt"
   local -a args=()
   while IFS= read -r arg; do [[ -n "$arg" ]] && args+=("$arg"); done < <(agent_cfg "$agent" '.extra_args[]?')
 
@@ -204,6 +231,12 @@ parse_args() {
     esac
   done
   [[ -z "$TIER" || -z "$AGENTS" ]] || die "use either -t or -a, not both"
+  # Validated here, in the main shell: candidates() runs in a subshell where die cannot stop us.
+  local a
+  for a in ${AGENTS//,/ }; do
+    jq -e --arg a "$a" '.agents[$a]' "$CONFIG" >/dev/null || die "unknown agent: $a"
+  done
+  [[ -z "$TIER" ]] || jq -e --arg t "$TIER" '.tiers[$t]' "$CONFIG" >/dev/null || die "unknown tier: $TIER"
   [[ -n "$PROMPT" ]] || { [[ -t 0 ]] && die "no prompt given"; PROMPT="$(cat)"; }
   [[ -n "${PROMPT//[[:space:]]/}" ]] || die "empty prompt"
   [[ -z "$dir" ]] || cd "$dir" || die "cannot cd to $dir"
@@ -213,11 +246,7 @@ parse_args() {
 candidates() {
   local a
   if [[ -n "$AGENTS" ]]; then
-    tr ',' '\n' <<<"$AGENTS" | while IFS= read -r a; do
-      [[ -n "$a" ]] || continue
-      jq -e --arg a "$a" '.agents[$a]' "$CONFIG" >/dev/null || die "unknown agent: $a"
-      echo "$a"
-    done
+    tr ',' '\n' <<<"$AGENTS" | sed '/^$/d'
   else
     local tier="${TIER:-$(cfg '.default_tier // "execute"')}"
     jq -e --arg t "$tier" '.tiers[$t]' "$CONFIG" >/dev/null || die "unknown tier: $tier"

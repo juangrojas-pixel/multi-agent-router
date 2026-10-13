@@ -2,9 +2,18 @@
   "cooldown_seconds": 3600,
   "default_tier": "execute",
   "tiers": {
-    "think": ["codex", "agy"],
-    "execute": ["agy", "codex"],
-    "draft": ["opencode", "agy"]
+    "think": [
+      "codex",
+      "agy"
+    ],
+    "execute": [
+      "agy",
+      "codex"
+    ],
+    "draft": [
+      "opencode",
+      "agy"
+    ]
   },
   "agents": {
     "codex": {
@@ -13,15 +22,18 @@
       "command": "pi",
       "model": "openai-codex/gpt-6.1-sol",
       "timeout_seconds": 900,
-      "extra_args": ["--tools", "read,grep,find,ls"]
+      "extra_args": [
+        "--tools",
+        "read,grep,find,ls"
+      ]
     },
     "agy": {
       "enabled": true,
-      "description": "Antigravity CLI (Gemini Pro/Flash, Claude, GPT-OSS on its own quota), plan mode",
+      "description": "Antigravity CLI (Gemini Pro/Flash, Claude, GPT-OSS on its own quota). Runs commands on its own in -p mode; read-only only by instruction",
       "command": "agy",
       "model": null,
       "timeout_seconds": 600,
-      "extra_args": ["--mode", "plan"],
+      "extra_args": [],
       "quota": {
         "group": "Gemini Models",
         "min_remaining": 0.10
@@ -33,7 +45,10 @@
       "command": "opencode",
       "model": "opencode/big-pickle",
       "timeout_seconds": 300,
-      "extra_args": ["--agent", "plan"]
+      "extra_args": [
+        "--agent",
+        "plan"
+      ]
     },
     "gentle-shell": {
       "enabled": true,
@@ -43,5 +58,6 @@
       "timeout_seconds": 900,
       "extra_args": []
     }
-  }
+  },
+  "prompt_preamble": "You are a read-only advisor called by another agent. Answer by reading files only: do not run shell commands, do not run tests, do not modify anything. Be concise and finish within a few minutes; an incomplete answer is better than none."
 }

@@ -1,6 +1,6 @@
 ---
 name: agy-worker
-description: Runs a bounded, well-specified task on the execute tier (agy in plan mode, falls back to codex) and returns the proposal for the caller to verify. Use for code reviews, focused analysis, or a proposed patch on a clear task. Read-only; its output must be verified before use.
+description: Runs a bounded, well-specified task on the execute tier (agy, falls back to codex; slow, can take 5-10 minutes) and returns the proposal for the caller to verify. Use for code reviews, focused analysis, or a proposed patch on a clear task. Read-only; its output must be verified before use.
 tools: Bash, Read, Grep, Glob
 model: haiku
 ---

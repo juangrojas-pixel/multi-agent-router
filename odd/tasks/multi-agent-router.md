@@ -59,3 +59,8 @@ T2: package as Claude Code plugin.
 - Installed: `multi-agent-router@multi-agent-router`, scope user, read from repo folder, enabled.
 - Bug found and fixed: ask-agent via ~/.local/bin symlink resolved ROOT to ~/.local; now resolves with `readlink -f`.
 - Not verified yet: hook running in a live session (needs `/reload-plugins` or new session), subagents end to end.
+
+## First real second opinion (agy reviewing bin/ask-agent)
+- Finding: agy in `-p` runs shell commands autonomously (ran `./bin/ask-agent status`, `agy -p /usage`) in plan mode and default mode alike; `--mode plan` does not make it read-only. Two runs hit 10m/5m timeouts with empty response.
+- Fix: recursion guard via `ASK_AGENT_DEPTH`; global `prompt_preamble` (read-only, no commands, concise); dropped `--mode plan` for agy. Third run answered in 8m, no files changed.
+- agy claims verified on bash 3.2.57: #1 empty-array/set -u FALSE, #2 readlink -f FALSE on this macOS (hardened with perl abs_path anyway), #3 missing `alarm 0` TRUE (fixed), #4 cooldown race in parallel TRUE (20 writers: 4/20 kept without lock, 20/20 with mkdir lock), #5 invalid agent ignored TRUE (agy's proposed fix also wrong: validation moved to parse_args in main shell), #6 model word splitting FALSE.

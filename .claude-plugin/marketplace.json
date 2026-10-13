@@ -1,0 +1,14 @@
+{
+  "name": "multi-agent-router",
+  "owner": {
+    "name": "Juan Rojas"
+  },
+  "plugins": [
+    {
+      "name": "multi-agent-router",
+      "source": "./",
+      "description": "Delegate prompts from Claude Code to codex (pi), agy, opencode and gentle-shell by tier, quota-aware"
+    }
+  ],
+  "description": "Local marketplace for the multi-agent-router plugin"
+}

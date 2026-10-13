@@ -1,0 +1,7 @@
+{
+  "name": "multi-agent-router",
+  "version": "0.1.0",
+  "description": "Delegate prompts from Claude Code to codex (pi), agy, opencode and gentle-shell by tier, quota-aware",
+  "author": { "name": "Juan Rojas" },
+  "license": "MIT"
+}

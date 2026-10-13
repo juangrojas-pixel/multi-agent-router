@@ -10,7 +10,8 @@
 # Tiers: think | execute | draft (see agents.json). Prompt is read from stdin if omitted.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 CONFIG="${ASK_AGENT_CONFIG:-$ROOT/agents.json}"
 STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/multi-agent-router"
 COOLDOWN_FILE="$STATE_DIR/cooldown.json"

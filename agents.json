@@ -1,0 +1,29 @@
+{
+  "chain": ["agy", "opencode", "gentle-shell"],
+  "cooldown_seconds": 3600,
+  "agents": {
+    "agy": {
+      "enabled": true,
+      "command": "agy",
+      "model": null,
+      "timeout": "600s",
+      "extra_args": [],
+      "quota": {
+        "group": "Gemini Models",
+        "min_remaining": 0.10
+      }
+    },
+    "opencode": {
+      "enabled": true,
+      "command": "opencode",
+      "model": "opencode/big-pickle",
+      "extra_args": []
+    },
+    "gentle-shell": {
+      "enabled": false,
+      "command": "gentle-shell",
+      "model": null,
+      "extra_args": []
+    }
+  }
+}

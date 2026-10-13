@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# ask-agent: route a prompt to an external agent CLI (agy, opencode, gentle-shell)
+# with proactive quota checks and reactive quota-error fallback.
+#
+# Usage:
+#   ask-agent [-a AGENT|auto] [-m MODEL] [-C DIR] [PROMPT]   (prompt from stdin if omitted)
+#   ask-agent status
+#   ask-agent reset [AGENT]                                  (clear cooldowns)
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG="${ASK_AGENT_CONFIG:-$ROOT/agents.json}"
+STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/multi-agent-router"
+COOLDOWN_FILE="$STATE_DIR/cooldown.json"
+QUOTA_ERROR_RE='rate.?limit|quota|429|resource.?exhausted|usage limit|too many requests|limit reached'
+
+log() { printf '[ask-agent] %s\n' "$*" >&2; }
+die() { log "error: $*"; exit 2; }
+
+command -v jq >/dev/null || die "jq is required"
+[[ -f "$CONFIG" ]] || die "config not found: $CONFIG"
+mkdir -p "$STATE_DIR"
+[[ -f "$COOLDOWN_FILE" ]] || echo '{}' >"$COOLDOWN_FILE"
+
+cfg() { jq -r "$1" "$CONFIG"; }
+agent_cfg() { jq -r --arg a "$1" ".agents[\$a]$2" "$CONFIG"; }
+
+now() { date +%s; }
+
+cooldown_until() { jq -r --arg a "$1" '.[$a] // 0' "$COOLDOWN_FILE"; }
+
+set_cooldown() {
+  local agent="$1" until="$2" tmp
+  tmp="$(mktemp)"
+  jq --arg a "$agent" --argjson u "$until" '.[$a] = $u' "$COOLDOWN_FILE" >"$tmp" && mv "$tmp" "$COOLDOWN_FILE"
+  log "$agent cooled down until $(date -r "$until" '+%Y-%m-%d %H:%M')"
+}
+
+clear_cooldown() {
+  local tmp
+  tmp="$(mktemp)"
+  if [[ -n "${1:-}" ]]; then
+    jq --arg a "$1" 'del(.[$a])' "$COOLDOWN_FILE" >"$tmp"
+  else
+    echo '{}' >"$tmp"
+  fi
+  mv "$tmp" "$COOLDOWN_FILE"
+}
+
+# --- agy quota ------------------------------------------------------------
+
+agy_usage_json() {
+  "$(agent_cfg agy .command)" -p "/usage" --output-format json --print-timeout 30s 2>/dev/null
+}
+
+# Prints "<min remaining fraction> <latest reset epoch>" for the configured group.
+agy_quota() {
+  local group usage
+  group="$(agent_cfg agy .quota.group)"
+  usage="$(agy_usage_json)" || return 1
+  jq -r --arg g "$group" '
+    [.command.data.groups[] | select(.name == $g) | .buckets[]] as $b
+    | if ($b | length) == 0 then empty
+      else "\([$b[].remaining_fraction] | min) \([$b[] | select(.remaining_fraction == ([$b[].remaining_fraction] | min)) | .reset_time | fromdateiso8601] | max)"
+      end' <<<"$usage"
+}
+
+# --- availability -----------------------------------------------------------
+
+# Returns 0 when the agent can be called now; prints the skip reason otherwise.
+check_agent() {
+  local agent="$1" cmd until quota remaining reset min
+  [[ "$(agent_cfg "$agent" .enabled)" == "true" ]] || { echo "disabled"; return 1; }
+  cmd="$(agent_cfg "$agent" .command)"
+  command -v "$cmd" >/dev/null || { echo "command not found: $cmd"; return 1; }
+  until="$(cooldown_until "$agent")"
+  ((until > $(now))) && { echo "cooldown until $(date -r "$until" '+%H:%M')"; return 1; }
+
+  if [[ "$agent" == "agy" ]]; then
+    quota="$(agy_quota)" || { echo "quota check failed"; return 1; }
+    [[ -n "$quota" ]] || { echo "quota group not found"; return 1; }
+    read -r remaining reset <<<"$quota"
+    min="$(agent_cfg agy .quota.min_remaining)"
+    if jq -en --argjson r "$remaining" --argjson m "$min" '$r < $m' >/dev/null; then
+      set_cooldown agy "$reset" >/dev/null 2>&1
+      echo "quota low ($(jq -n "$remaining * 100 | floor")% < $(jq -n "$min * 100 | floor")%)"
+      return 1
+    fi
+  fi
+  return 0
+}
+
+# --- invocation -------------------------------------------------------------
+
+# Runs the agent; answer on stdout. Exit 0 ok, 3 quota error, 1 other failure.
+run_agent() {
+  local agent="$1" prompt="$2" model="$3" cmd out err rc
+  cmd="$(agent_cfg "$agent" .command)"
+  [[ -n "$model" ]] || model="$(agent_cfg "$agent" '.model // empty')"
+  local -a args=()
+  while IFS= read -r a; do [[ -n "$a" ]] && args+=("$a"); done < <(agent_cfg "$agent" '.extra_args[]?')
+
+  err="$(mktemp)"
+  case "$agent" in
+    agy)
+      local timeout
+      timeout="$(agent_cfg agy '.timeout // "600s"')"
+      out="$("$cmd" -p "$prompt" --output-format json --print-timeout "$timeout" \
+        ${model:+--model "$model"} ${args[@]+"${args[@]}"} 2>"$err")"
+      rc=$?
+      if ((rc == 0)) && [[ "$(jq -r '.status // empty' <<<"$out" 2>/dev/null)" == "SUCCESS" ]]; then
+        jq -r '.response' <<<"$out"
+        rm -f "$err"; return 0
+      fi
+      out="$out"$'\n'"$(<"$err")"
+      ;;
+    opencode)
+      out="$("$cmd" run ${model:+-m "$model"} ${args[@]+"${args[@]}"} "$prompt" 2>"$err")"
+      rc=$?
+      if ((rc == 0)) && [[ -n "$out" ]]; then
+        printf '%s\n' "$out"
+        rm -f "$err"; return 0
+      fi
+      out="$out"$'\n'"$(<"$err")"
+      ;;
+    gentle-shell)
+      out="$("$cmd" -- -p --no-session ${model:+--model "$model"} ${args[@]+"${args[@]}"} "$prompt" 2>"$err")"
+      rc=$?
+      if ((rc == 0)) && [[ -n "$out" ]]; then
+        printf '%s\n' "$out"
+        rm -f "$err"; return 0
+      fi
+      out="$out"$'\n'"$(<"$err")"
+      ;;
+    *) rm -f "$err"; die "unknown agent: $agent" ;;
+  esac
+  rm -f "$err"
+
+  if grep -Eqi "$QUOTA_ERROR_RE" <<<"$out"; then
+    log "$agent hit a quota/rate limit: $(tail -n 3 <<<"$out" | tr '\n' ' ')"
+    return 3
+  fi
+  log "$agent failed (exit $rc): $(tail -n 5 <<<"$out" | tr '\n' ' ')"
+  return 1
+}
+
+# --- commands ---------------------------------------------------------------
+
+cmd_status() {
+  local agent reason quota
+  while IFS= read -r agent; do
+    if reason="$(check_agent "$agent")"; then
+      printf '%-13s ready\n' "$agent"
+    else
+      printf '%-13s skip: %s\n' "$agent" "$reason"
+    fi
+  done < <(cfg '.chain[]')
+
+  if [[ "$(agent_cfg agy .enabled)" == "true" ]] && command -v "$(agent_cfg agy .command)" >/dev/null; then
+    echo
+    echo "agy quota:"
+    agy_usage_json | jq -r '.command.data.groups[] | .name as $g | .buckets[]
+      | "  \($g) / \(.window): \(.remaining_fraction * 100 | floor)% (reset \(.reset_time))"'
+  fi
+}
+
+cmd_ask() {
+  local agent="auto" model="" dir="" prompt=""
+  while (($#)); do
+    case "$1" in
+      -a|--agent) agent="$2"; shift 2 ;;
+      -m|--model) model="$2"; shift 2 ;;
+      -C|--cwd) dir="$2"; shift 2 ;;
+      -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      --) shift; prompt="$*"; break ;;
+      -*) die "unknown option: $1" ;;
+      *) prompt="$*"; break ;;
+    esac
+  done
+  [[ -n "$prompt" ]] || { [[ -t 0 ]] && die "no prompt given"; prompt="$(cat)"; }
+  [[ -n "$prompt" ]] || die "empty prompt"
+  [[ -z "$dir" ]] || cd "$dir" || die "cannot cd to $dir"
+
+  local -a candidates=()
+  if [[ "$agent" == "auto" ]]; then
+    while IFS= read -r a; do candidates+=("$a"); done < <(cfg '.chain[]')
+  else
+    jq -e --arg a "$agent" '.agents[$a]' "$CONFIG" >/dev/null || die "unknown agent: $agent"
+    candidates=("$agent")
+  fi
+
+  local a reason rc
+  for a in "${candidates[@]}"; do
+    if ! reason="$(check_agent "$a")"; then
+      log "skip $a: $reason"
+      continue
+    fi
+    log "using $a"
+    run_agent "$a" "$prompt" "$model"
+    rc=$?
+    case $rc in
+      0) return 0 ;;
+      3) set_cooldown "$a" $(($(now) + $(cfg '.cooldown_seconds // 3600'))) ;;
+    esac
+  done
+  die "no agent could answer (tried: ${candidates[*]})"
+}
+
+case "${1:-}" in
+  status) cmd_status ;;
+  reset) clear_cooldown "${2:-}"; log "cooldown cleared ${2:-for all agents}" ;;
+  *) cmd_ask "$@" ;;
+esac

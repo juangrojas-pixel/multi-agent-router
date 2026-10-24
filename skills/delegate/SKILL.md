@@ -5,18 +5,20 @@ description: Delegate work to external agent CLIs (codex/pi, agy, opencode, gent
 
 # Delegate to external agents
 
-Claude is the orchestrator and the only writer. External agents are read-only advisors whose output is evidence, not truth.
+Claude is the orchestrator. gentle-shell, agy and opencode are executors: they do the whole task, writing included, inside `-C DIR` and return a receipt (files written, commands run). codex is a read-only advisor. Easy, well-specified work goes to agy or opencode; work that needs real thinking goes to gentle-shell.
 
-Read-only is enforced by instruction, not by sandbox: agy runs shell commands on its own in `-p` mode, and a thorough review can take 5 to 10 minutes. Delegate from a clean git tree and check `git status` afterwards. `ask-agent` refuses nested calls, so an agent cannot route back into another agent.
+Client servers, OCI and databases: Claude or gentle-shell; agy read-only (report work), enforced by `~/.claude/hooks/agy/vce_guards_agy.py` in `~/.gemini/config/hooks.json` (same guards plus a read-only rule; denials logged to `~/.cache/vce-guards/agy.jsonl`). gentle-shell loads the same Claude Code guards (`~/.claude/hooks/pi-extension/vce-guards.js`, symlinked into `~/.gentle-shell/agent/extensions/`). When it reports `CONFIRMACION REQUERIDA`, relay it to the user and stop; only on an explicit yes, re-run it saying the user confirmed that exact command, so it retries with `HOOK_CONFIRMADO=1`.
+
+Trust the receipt: check one thing (the file exists, or one command) and never reread, redo or rewrite the agent's work; that doubles the cost. The limits (stay inside the working directory, no push, publish, data deletion or remote servers) are enforced by instruction, not by sandbox. Delegate from a clean git tree and check `git status` afterwards. `ask-agent` refuses nested calls, so an agent cannot route back into another agent.
 
 ## Pick the tier
 
 | Tier | Agents (in order) | Use for | Never for |
 |---|---|---|---|
 | `think` | codex, agy | Architecture, hard bugs, independent second opinion | Trivial work |
-| `execute` | agy, codex | Bounded, well-specified tasks; reviews; proposed diffs | Unverified changes |
+| `execute` | agy, codex | Bounded, well-specified tasks, writing included | Client servers, secrets |
 | `draft` | opencode, agy | Docs, summaries, changelogs, translations, boilerplate prose | Decisions, security, shipped code |
-| explicit | gentle-shell | Only when the user asks for gentle-shell | Default routing |
+| explicit | gentle-shell | Work that needs real thinking, writing included (`-a gentle-shell`) | Trivial work |
 
 If the task is small and you already have the context, do it yourself: delegation costs a round trip plus reading the answer.
 

@@ -1,22 +1,23 @@
 # multi-agent-router
 
 Claude Code plugin that lets Claude orchestrate other agent CLIs by tier, quota-aware.
-Claude stays the only writer; external agents are read-only advisors.
+Executors (gentle-shell, agy, opencode) do the whole task, writing included, inside `-C DIR` and return a receipt; codex is a read-only advisor. gentle-shell (besides Claude) works on client servers under the same guards as Claude (`~/.claude/hooks/pi-extension`); agy only read-only, enforced by a hook (`~/.claude/hooks/agy`). agy and opencode take easy, well-specified work; gentle-shell takes work that needs real thinking.
 
 | Tier | Agents | Use for |
 |---|---|---|
 | `think` | codex (bare pi, GPT via ChatGPT), agy | Architecture, hard bugs, second opinions |
 | `execute` | agy, codex | Bounded tasks, reviews, proposed diffs (verified by Claude) |
-| `draft` | opencode (free model, plan agent), agy | Docs, summaries, boilerplate |
+| `draft` | opencode (free model, build agent), agy | Docs, summaries, boilerplate |
 | explicit | gentle-shell | Only with `-a gentle-shell` |
 
 ## Pieces
 
-- `bin/ask-agent`: router. Refuses nested calls (`ASK_AGENT_DEPTH`), prepends a read-only `prompt_preamble` to every prompt. Tier fallback, agy quota check via `agy -p /usage` (0 tokens), reactive quota-error cooldown, per-agent timeout that kills the whole process group.
-- `agents.json`: tiers, models, timeouts, quota threshold, enabled flags.
+- `bin/ask-agent`: router. Refuses nested calls (`ASK_AGENT_DEPTH`), prepends a `prompt_preamble` to every prompt: the agent's own (executor) or the global read-only one (advisor). Tier fallback, agy quota check via `agy -p /usage` (0 tokens), reactive quota-error cooldown, per-agent timeout that kills the whole process group.
+- `agents.json`: tiers, models, timeouts, quota threshold, enabled flags, and `routing` (the single routing policy: general text, directive template, ordered rules; inline rules first, first match wins).
+- `bin/route-hint`: `UserPromptSubmit` hook. Matches the prompt against `routing.rules` and injects a concrete `ROUTE NOW ... ask-agent -a <agent>` directive, nothing for inline rules, or the general policy when no rule matches. When the matched agent is in cooldown (out of quota, from `ask-agent`'s `cooldown.json`), it injects a `SKIP DELEGATION` note instead, until the cooldown expires. Logs each decision to `~/.cache/multi-agent-router/route.jsonl` (rule, agent, prompt length; never the prompt text). `route-hint --stats` counts decisions per rule. Tests: `tests/route-hint.test.sh`, `tests/ask-agent.test.sh`.
 - `agents/`: subagents `codex-thinker`, `agy-worker`, `opencode-docs`.
 - `skills/delegate`: tier policy and how to delegate.
-- `hooks/register.ts`: checks readiness at session start (status line) and injects the policy plus readiness into the system prompt.
+- `hooks/register.ts`: checks readiness at session start (status line) and injects a short frame, `routing.general` and readiness into the system prompt.
 
 ## Usage
 

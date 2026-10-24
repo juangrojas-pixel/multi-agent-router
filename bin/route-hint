@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# route-hint: UserPromptSubmit hook that turns the routing policy in agents.json
+# into a per-prompt directive, and logs each decision (never the prompt text).
+#
+# Usage:
+#   route-hint            read the hook JSON on stdin, print hook JSON on stdout
+#   route-hint --stats    count logged decisions per rule
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+CONFIG="${ASK_AGENT_CONFIG:-$ROOT/agents.json}"
+STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/multi-agent-router"
+LOG="$STATE_DIR/route.jsonl"
+
+if [[ "${1:-}" == "--stats" ]]; then
+  [[ -s "$LOG" ]] || { echo "no decisions logged yet ($LOG)"; exit 0; }
+  jq -rs 'group_by(.rule) | map("\(length)\t\(.[0].rule)\t\(.[0].agent // "inline")")
+    | sort_by(-(split("\t")[0] | tonumber)) | .[]' "$LOG"
+  exit 0
+fi
+
+prompt="$(jq -r '.prompt // ""')"
+# Slash commands carry their own instructions; leave them alone.
+[[ "$prompt" == /* ]] && exit 0
+# Background-task events arrive as prompts too; they are not user requests.
+[[ "$prompt" == *"<task-notification>"* || "$prompt" == *"[SYSTEM NOTIFICATION"* ]] && exit 0
+
+# First matching rule wins; inline rules come first in agents.json.
+decision="$(jq -c --arg p "$prompt" '
+  .routing as $r
+  | ([$r.rules[] | select(.match as $m | $p | test($m; "i"))] | first) as $hit
+  | if $hit == null then {rule: "none", agent: null, text: $r.general}
+    elif $hit.agent == null then {rule: $hit.id, agent: null, text: null}
+    else {rule: $hit.id, agent: $hit.agent,
+          text: ($r.directive | gsub("\\{rule\\}"; $hit.id) | gsub("\\{agent\\}"; $hit.agent)
+                 | gsub("\\{verify\\}"; $hit.verify // ""))}
+    end' "$CONFIG")"
+
+# ask-agent writes cooldown.json when an agent runs out of quota (until its reset, or
+# cooldown_seconds after a quota error); skip routing to it until that passes.
+now="$(date +%s)"
+agent="$(jq -r '.agent // empty' <<<"$decision")"
+until=0
+if [[ -n "$agent" && -s "$STATE_DIR/cooldown.json" ]]; then
+  until="$(jq -r --arg a "$agent" '.[$a] // 0' "$STATE_DIR/cooldown.json" 2>/dev/null || echo 0)"
+fi
+if ((until > now)); then
+  decision="$(jq -c --arg at "$(date -d "@$until" '+%H:%M')" '.cooldown = true
+    | .text = "SKIP DELEGATION (multi-agent-router): this prompt matches `\(.rule)`, but \(.agent) is in cooldown (out of quota) until \($at). Do it yourself and say so in one line."' <<<"$decision")"
+fi
+
+mkdir -p "$STATE_DIR" 2>/dev/null &&
+  jq -c --argjson ts "$now" --argjson len "${#prompt}" \
+    '{ts: $ts, rule, agent, cooldown: (.cooldown // false), prompt_chars: $len}' <<<"$decision" >>"$LOG" 2>/dev/null || true
+
+text="$(jq -r '.text // empty' <<<"$decision")"
+[[ -n "$text" ]] || exit 0
+jq -n --arg ctx "$text" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $ctx}}'

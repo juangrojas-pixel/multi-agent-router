@@ -29,35 +29,75 @@
     },
     "agy": {
       "enabled": true,
-      "description": "Antigravity CLI (Gemini Pro/Flash, Claude, GPT-OSS on its own quota). Runs commands on its own in -p mode; read-only only by instruction",
+      "description": "Antigravity CLI (Gemini Pro/Flash, Claude, GPT-OSS on its own quota); executes easy, well-specified tasks",
       "command": "agy",
       "model": null,
       "timeout_seconds": 600,
       "extra_args": [],
       "quota": {
         "group": "Gemini Models",
-        "min_remaining": 0.10
-      }
+        "min_remaining": 0.1
+      },
+      "prompt_preamble": "You are an executor called by another agent. Do the task end to end inside the current working directory: create and edit files and run the commands it needs. On client servers, OCI and databases you are read-only: only list, get, read logs and SELECT; the VCE guards deny anything else. When a guard denies a call, stop the task and reply with the guard message and the exact blocked command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result."
     },
     "opencode": {
       "enabled": true,
-      "description": "OpenCode with a free model, read-only plan agent; drafts only",
+      "description": "OpenCode with a free model (build agent); executes easy, well-specified tasks",
       "command": "opencode",
       "model": "opencode/big-pickle",
       "timeout_seconds": 300,
-      "extra_args": [
-        "--agent",
-        "plan"
-      ]
+      "extra_args": [],
+      "prompt_preamble": "You are an executor called by another agent. Do the task end to end inside the current working directory: create and edit files and run the commands it needs. Do not touch files outside it, do not push, publish, delete data, or connect to remote servers. When done, reply with a short receipt only: files written and commands run with their result."
     },
     "gentle-shell": {
       "enabled": true,
-      "description": "Full gentle-ai stack on pi; explicit use only (-a gentle-shell), never in tiers",
+      "description": "Full gentle-ai stack on pi; executes tasks that need real thinking; explicit use only (-a gentle-shell), never in tiers",
       "command": "gentle-shell",
       "model": null,
       "timeout_seconds": 900,
-      "extra_args": []
+      "extra_args": [],
+      "prompt_preamble": "You are an executor called by another agent. Do the task end to end: create and edit files and run the commands it needs, including client servers, OCI CLI and databases when the task asks for it. The VCE guards run on every tool call. When a guard blocks a command with CONFIRMACION REQUERIDA, stop the task and reply with the guard message and the exact blocked command; never add HOOK_CONFIRMADO=1 unless this task says the user confirmed that exact command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result."
     }
+  },
+  "routing": {
+    "general": "AUTO-ROUTING (multi-agent-router). Goal: save Claude tokens. Delegate the whole task, writing included, and call by agent (`ask-agent -a <agent> -C <dir>`), never by tier. agy and opencode: easy, well-specified work (templates, docs, summaries, mechanical edits). gentle-shell: work that needs real thinking (architecture, design, root cause, review, complex documents). codex: read-only second opinion. Executors write files in -C DIR and return a receipt. Trust the receipt: check one thing (the file exists, or one command) and never reread, redo or rewrite their work. Client servers/OCI/DBs: you or gentle-shell (the VCE guards run on both); agy only read-only (reports: gather evidence and write them, guarded and read-only by hook); never opencode or codex. When gentle-shell reports CONFIRMACION REQUERIDA, relay it to the user (what, which client and compartment) and stop; only on an explicit yes, re-run gentle-shell saying the user confirmed that exact command, so it retries with HOOK_CONFIRMADO=1. Secrets and trivial lookups stay inline. On quota or error, do it yourself and say so in one line. Mention which agent answered.",
+    "directive": "ROUTE NOW (multi-agent-router, user-authorized standing rule): this prompt matches `{rule}`. Before doing it yourself, run `ask-agent -a {agent} -C <dir> \"<self-contained task with the needed context and file paths>\"`. {verify} If the task turns out to touch client servers/OCI/DBs, hand it to gentle-shell (agy only for read-only report work) or do it yourself; secrets stay inline; if the agent fails, do it yourself (say so in one line). Mention which agent answered.",
+    "rules": [
+      {
+        "id": "inline-explicit",
+        "agent": null,
+        "match": "sin delegar|no delegues|without delegat|don.t delegate"
+      },
+      {
+        "id": "inline-sensitive",
+        "agent": null,
+        "match": "richmond|raven|corpacero|coparcero|croydon|integral|pegatex|artecola|dapsa|elimarc|grodco|taurel|topdrilling|vcetest|sefarcol|servidor|\\bserver|\\bssh\\b|\\boci\\b|bastion|producci[oó]n|base de datos|\\bbd\\b|oracle|sqlcl|password|contrase[nñ]a|secreto|credencial|\\btoken"
+      },
+      {
+        "id": "second-opinion",
+        "agent": "codex",
+        "match": "segunda opini[oó]n|second opinion|otro modelo|otra opini[oó]n",
+        "verify": "Compare its answer with your own view and report where they differ."
+      },
+      {
+        "id": "design",
+        "agent": "gentle-shell",
+        "match": "arquitectura|architecture|dise[nñ]o|\\bdesign|trade-?off|conviene|qu[eé] opin|causa ra[ií]z|root cause|por qu[eé] falla|\\breview|revis[aá] (el|este|mi|la) (c[oó]digo|diff|pr\\b)|\\bpensar\\b|piensa|qu[eé] otr[oa]s|suger|alternativas|opciones|qu[eé] podr[ií]a|qu[eé] (falta|faltar[ií]a)",
+        "verify": "Spot-check 1 key claim or output (path:line or a command); never re-derive the reasoning."
+      },
+      {
+        "id": "docs",
+        "agent": "opencode",
+        "match": "readme|changelog|documenta|resum[ií]|resumen|summar|traduc|translat|borrador|\\bdraft",
+        "verify": "Check the file exists and one fact; do not reread or rewrite it."
+      },
+      {
+        "id": "spec",
+        "agent": "agy",
+        "match": "plantilla|template|checklist|seg[uú]n (la|el) (skill|spec)|lista de pasos",
+        "verify": "Pass the spec path; check the result has the spec structure, not by redoing the content."
+      }
+    ]
   },
   "prompt_preamble": "You are a read-only advisor called by another agent. Answer by reading files only: do not run shell commands, do not run tests, do not modify anything. Be concise and finish within a few minutes; an incomplete answer is better than none."
 }

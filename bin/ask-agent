@@ -88,14 +88,16 @@ reset_cooldown() {
 # --- process control --------------------------------------------------------
 
 # Runs a command with a hard time limit (macOS has no coreutils `timeout`).
-# The command gets its own process group and no stdin, so wrapper CLIs
-# (node -> pi) are killed together with their children; exits 142 on expiry.
+# The command gets its own session (so its own process group, killed together
+# with wrapper children like node -> pi) and no stdin or controlling terminal:
+# under an interactive host a background group touching the tty is stopped by
+# SIGTTOU/SIGTTIN and would hang until the timeout. Exits 142 on expiry.
 with_timeout() {
   local secs="$1"; shift
-  perl -e '
+  perl -MPOSIX -e '
     my $secs = shift;
     my $pid = fork() // die "fork failed: $!";
-    if ($pid == 0) { setpgrp(0, 0); open(STDIN, "<", "/dev/null"); exec @ARGV or die "exec failed: $!"; }
+    if ($pid == 0) { POSIX::setsid(); open(STDIN, "<", "/dev/null"); exec @ARGV or die "exec failed: $!"; }
     local $SIG{ALRM} = sub {
       kill "TERM", -$pid; sleep 2; kill "KILL", -$pid;
       waitpid($pid, 0); exit 142;
@@ -153,19 +155,41 @@ check_agent() {
 
 # --- invocation -----------------------------------------------------------------
 
+record_last_run() {
+  local agent="$1" tier="$2" ts="$3" rc="$4" secs="$5" ans="$6"
+  local last_dir="$STATE_DIR/last" tmp
+  mkdir -p "$last_dir" 2>/dev/null || return 0
+  tmp="$(mktemp "$last_dir/.last.XXXXXX" 2>/dev/null)" || return 0
+  if jq -n \
+    --arg agent "$agent" \
+    --arg tier "$tier" \
+    --argjson ts "$ts" \
+    --argjson exit "$rc" \
+    --argjson seconds "$secs" \
+    --arg answer "${ans:0:2000}" \
+    '{agent: $agent, tier: $tier, ts: $ts, exit: $exit, seconds: $seconds, answer: $answer}' \
+    >"$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$last_dir/$agent.json" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  else
+    rm -f "$tmp" 2>/dev/null
+  fi
+}
+
 # Runs the agent; answer on stdout. Exit 0 ok, 3 quota error, 1 other failure.
 run_agent() {
-  local agent="$1" prompt="$2" model="$3" cmd out err rc arg secs answer
+  local agent="$1" prompt="$2" model="$3" cmd out err rc arg secs answer t0 t1
   cmd="$(agent_cfg "$agent" .command)"
   [[ -n "$model" ]] || model="$(agent_cfg "$agent" '.model // empty')"
   secs="$(agent_cfg "$agent" '.timeout_seconds // 600')"
   local preamble
-  preamble="$(cfg '.prompt_preamble // empty')"
+  # Per-agent preamble (executors) wins over the global read-only one (advisors).
+  preamble="$(jq -r --arg a "$agent" '.agents[$a].prompt_preamble // .prompt_preamble // empty' "$CONFIG")"
   [[ -z "$preamble" ]] || prompt="$preamble"$'\n\n'"$prompt"
   local -a args=()
   while IFS= read -r arg; do [[ -n "$arg" ]] && args+=("$arg"); done < <(agent_cfg "$agent" '.extra_args[]?')
 
   err="$(mktemp)"
+  t0="$(now)"
   case "$agent" in
     codex)
       out="$(with_timeout "$secs" "$cmd" -p --no-session --no-extensions --no-skills --no-context-files \
@@ -198,6 +222,8 @@ run_agent() {
   esac
   out="$out"$'\n'"$(<"$err")"
   rm -f "$err"
+  t1="$(now)"
+  record_last_run "$agent" "${TIER:-}" "$t1" "$rc" "$((t1 - t0))" "${answer:-$out}" 2>/dev/null || true
 
   if ((rc == 0)) && [[ -n "${answer//[[:space:]]/}" ]]; then
     printf '%s\n' "$answer"

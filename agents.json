@@ -69,9 +69,33 @@
         "match": "sin delegar|no delegues|without delegat|don.t delegate"
       },
       {
+        "id": "explicit-delegate",
+        "agent": "gentle-shell",
+        "match": "ap[oó]yate|dem[aá]s agentes|otros agentes|(utiliza|usa|llama|con|ll[eé]va(lo|la|las|los)? a|que lo (haga|corrija)) (tambi[eé]n )?(a )?(agy|gentle-?shell|opencode|codex)\\b|trabajando solo|delega",
+        "verify": "The user asked for delegation explicitly: if the prompt names agy, opencode or codex, call that agent instead. For client work, save the handoff first (mem_save, project=<client>, topic_key=handoff/actual: task, files, tables, last error, decisions) and tell the agent to read it with mem_search(query=\"handoff/actual\", project=\"<client>\")."
+      },
+      {
         "id": "inline-sensitive",
         "agent": null,
-        "match": "richmond|raven|corpacero|coparcero|croydon|integral|pegatex|artecola|dapsa|elimarc|grodco|taurel|topdrilling|vcetest|sefarcol|servidor|\\bserver|\\bssh\\b|\\boci\\b|bastion|producci[oó]n|base de datos|\\bbd\\b|oracle|sqlcl|password|contrase[nñ]a|secreto|credencial|\\btoken"
+        "match": "password|contrase[nñ]a|secreto|credencial|\\btoken|api ?key|\\bpass\\b|reinici|restart|\\bapag|encend|enciende|\\bstop\\b|drop |truncate|abr[ei] (el|los) puertos?|firewall|0\\.0\\.0\\.0"
+      },
+      {
+        "id": "report-doc",
+        "agent": "agy",
+        "match": "\\bpdf\\b|drive|s[uú]belo|excel|minutograma|(haz|hace|arm|gener|cre|termin|actualiz|redact)\\w* .{0,40}(informe|reporte|documento)",
+        "verify": "Pass the skill or spec to follow and, for client reports, the handoff key (handoff/actual in the client's engram project). Check the output file exists; do not reread or rewrite it."
+      },
+      {
+        "id": "client-text",
+        "agent": "agy",
+        "match": "correo|e-?mail|responde|contest|qu[eé] (le |les )?dig|textualmente|for dummies|whatsapp|\\bwpp\\b",
+        "verify": "Give it the message to answer and the facts to state; review the draft once before showing it to the user."
+      },
+      {
+        "id": "client-work",
+        "agent": "gentle-shell",
+        "match": "richmond|raven|corpacero|coparcero|croydon|integral|pegatex|artecola|dapsa|elimarc|grodco|taurel|topdrilling|vcetest|sefarcol|sodimac|\\bjde\\b|\\bapex\\b|\\bords\\b|weblogic|\\bvpn\\b|\\brdp\\b|\\bhka\\b|\\bdian\\b|factura|servidor|\\bserver|\\bssh\\b|\\boci\\b|bastion|producci[oó]n|base de datos|\\bbd\\b|oracle|sqlcl",
+        "verify": "Save the handoff first (mem_save, project=<client>, topic_key=handoff/actual: task, files, tables, last error, decisions) and tell the agent to read it with mem_search(query=\"handoff/actual\", project=\"<client>\"). A one-line answer you already know stays inline. Spot-check 1 key fact of its answer."
       },
       {
         "id": "second-opinion",
@@ -82,7 +106,7 @@
       {
         "id": "design",
         "agent": "gentle-shell",
-        "match": "arquitectura|architecture|dise[nñ]o|\\bdesign|trade-?off|conviene|qu[eé] opin|causa ra[ií]z|root cause|por qu[eé] falla|\\breview|revis[aá] (el|este|mi|la) (c[oó]digo|diff|pr\\b)|\\bpensar\\b|piensa|qu[eé] otr[oa]s|suger|alternativas|opciones|qu[eé] podr[ií]a|qu[eé] (falta|faltar[ií]a)",
+        "match": "arquitectura|architecture|dise[nñ]o|\\bdesign|trade-?off|conviene|qu[eé] opin|causa ra[ií]z|root cause|por qu[eé] falla|\\breview|revis[aá] (el|este|mi|la) (c[oó]digo|diff|pr\\b)|\\bpensar\\b|piensa|qu[eé] otr[oa]s|suger|alternativas|opciones|qu[eé] podr[ií]a|qu[eé] (falta|faltar[ií]a)|\\bplan\\b|mejor (ruta|forma|opci[oó]n)|pensemos|qu[eé] te parece|c[oó]mo (hacemos|calculamos|se calcula|vamos a manejar|se hace)|por qu[eé]|ser[aá] que|eval[uú]a",
         "verify": "Spot-check 1 key claim or output (path:line or a command); never re-derive the reasoning."
       },
       {

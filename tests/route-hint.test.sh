@@ -38,10 +38,36 @@ out="$(context "escribi un README y un changelog para esto")"
 out="$(context "arma el .md siguiendo la plantilla del informe")"
 [[ "$out" == *'ask-agent -a agy'* ]]; check "template work routes to agy" $?
 
-# Inline guards win over routing rules.
+out="$(context "apoyate en los demas agentes para el informe de croydon")"
+[[ "$out" == *'ask-agent -a gentle-shell'* ]]; check "explicit delegation routes to gentle-shell" $?
+[[ "$(last_rule)" == explicit-delegate ]]; check "explicit delegation beats client names" $?
+
+out="$(context "pasalo a PDF y subelo a drive")"
+[[ "$out" == *'ask-agent -a agy'* ]]; check "pdf/drive routes to agy" $?
+[[ "$(last_rule)" == report-doc ]]; check "pdf/drive logs report-doc" $?
+
+out="$(context "puedes responder este correo que me piden estatus")"
+[[ "$out" == *'ask-agent -a agy'* ]]; check "email reply routes to agy" $?
+[[ "$(last_rule)" == client-text ]]; check "email reply logs client-text" $?
+
+out="$(context "como se calculan los contenedores en jde")"
+[[ "$out" == *'ask-agent -a gentle-shell'* && "$out" == *'handoff/actual'* ]]; check "client question routes to gentle-shell with handoff" $?
+[[ "$(last_rule)" == client-work ]]; check "client question logs client-work" $?
+
 out="$(context "revisa la arquitectura del servidor de richmond por ssh")"
-[[ "$out" != *'ask-agent -a'* ]]; check "client/server prompt stays inline" $?
-[[ "$(last_rule)" == inline-sensitive ]]; check "client prompt logs inline-sensitive" $?
+[[ "$out" == *'ask-agent -a gentle-shell'* ]]; check "client server review routes to gentle-shell" $?
+
+out="$(context "cual es la mejor ruta para hacerlo")"
+[[ "$out" == *'ask-agent -a gentle-shell'* ]]; check "planning question routes to gentle-shell" $?
+[[ "$(last_rule)" == design ]]; check "planning question logs design" $?
+
+# Inline guards win over routing rules.
+out="$(context "reinicia el servidor de richmond")"
+[[ "$out" != *'ask-agent -a'* ]]; check "server restart stays inline" $?
+[[ "$(last_rule)" == inline-sensitive ]]; check "restart logs inline-sensitive" $?
+
+out="$(context "pasame el password de la bd de croydon")"
+[[ "$out" != *'ask-agent -a'* ]]; check "secret stays inline" $?
 
 out="$(context "sin delegar: que conviene en esta arquitectura")"
 [[ "$out" != *'ask-agent -a'* ]]; check "sin delegar stays inline" $?

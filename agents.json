@@ -32,7 +32,7 @@
       "description": "Antigravity CLI (Gemini Pro/Flash, Claude, GPT-OSS on its own quota); executes easy, well-specified tasks",
       "command": "agy",
       "model": null,
-      "timeout_seconds": 600,
+      "timeout_seconds": 1800,
       "extra_args": [],
       "quota": {
         "group": "Gemini Models",
@@ -54,7 +54,7 @@
       "description": "Full gentle-ai stack on pi; executes tasks that need real thinking; explicit use only (-a gentle-shell), never in tiers",
       "command": "gentle-shell",
       "model": null,
-      "timeout_seconds": 900,
+      "timeout_seconds": 1800,
       "extra_args": [],
       "prompt_preamble": "You are an executor called by another agent. Do the task end to end: create and edit files and run the commands it needs, including client servers, OCI CLI and databases when the task asks for it. The VCE guards run on every tool call. When a guard blocks a command with CONFIRMACION REQUERIDA, stop the task and reply with the guard message and the exact blocked command; never add HOOK_CONFIRMADO=1 unless this task says the user confirmed that exact command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result."
     }

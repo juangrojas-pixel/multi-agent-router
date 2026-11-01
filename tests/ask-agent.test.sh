@@ -129,6 +129,21 @@ else
   echo "SKIP: hc not installed, hc backend tests not run"
 fi
 
+# An agent asked by name falls back to its configured fallback when it hits its quota.
+QUOTA_STUB="$SCRATCH/quota-stub"
+printf '#!/usr/bin/env bash\necho "Free usage limit reached" >&2\nexit 1\n' >"$QUOTA_STUB"
+chmod +x "$QUOTA_STUB"
+jq --arg q "$QUOTA_STUB" '.agents.opencode.command = $q' "$ASK_AGENT_CONFIG" >"$SCRATCH/fb.json"
+out="$(XDG_CACHE_HOME="$SCRATCH/cache-fb" ASK_AGENT_CONFIG="$SCRATCH/fb.json" "$ASK" -a opencode "PING" 2>"$SCRATCH/err")"
+[[ "$out" == *"PING"* && "$out" == *"you are read-only"* ]]; check "opencode out of quota falls back to agy" $?
+# Once in cooldown, opencode is skipped and agy answers directly.
+out="$(XDG_CACHE_HOME="$SCRATCH/cache-fb" ASK_AGENT_CONFIG="$SCRATCH/fb.json" "$ASK" -a opencode "PING" 2>"$SCRATCH/err")"
+[[ "$out" == *"PING"* ]] && grep -q 'skip opencode' "$SCRATCH/err"; check "opencode in cooldown is skipped for agy" $?
+# An agent without a fallback still fails alone (previous behavior).
+jq --arg q "$QUOTA_STUB" '.agents.codex.command = $q' "$ASK_AGENT_CONFIG" >"$SCRATCH/nofb.json"
+XDG_CACHE_HOME="$SCRATCH/cache-nofb" ASK_AGENT_CONFIG="$SCRATCH/nofb.json" "$ASK" -a codex "PING" >/dev/null 2>&1
+[[ $? != 0 ]]; check "agent without fallback still fails" $?
+
 # Unknown backend is rejected.
 "$ASK" --backend nope -a codex "PING" >/dev/null 2>&1; [[ $? == 2 ]]; check "unknown backend is rejected" $?
 

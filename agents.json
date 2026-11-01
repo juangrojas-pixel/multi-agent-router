@@ -47,7 +47,10 @@
       "model": "opencode/big-pickle",
       "timeout_seconds": 300,
       "extra_args": [],
-      "prompt_preamble": "You are an executor called by another agent. Do the task end to end inside the current working directory: create and edit files and run the commands it needs. Do not touch files outside it, do not push, publish, delete data, or connect to remote servers. When done, reply with a short receipt only: files written and commands run with their result."
+      "prompt_preamble": "You are an executor called by another agent. Do the task end to end inside the current working directory: create and edit files and run the commands it needs. Do not touch files outside it, do not push, publish, delete data, or connect to remote servers. When done, reply with a short receipt only: files written and commands run with their result.",
+      "fallback": [
+        "agy"
+      ]
     },
     "gentle-shell": {
       "enabled": true,

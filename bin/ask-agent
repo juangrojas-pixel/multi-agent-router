@@ -358,7 +358,10 @@ parse_args() {
 candidates() {
   local a
   if [[ -n "$AGENTS" ]]; then
-    tr ',' '\n' <<<"$AGENTS" | sed '/^$/d'
+    # Named agents first, then each one's configured fallbacks (deduplicated).
+    { tr ',' '\n' <<<"$AGENTS"
+      for a in ${AGENTS//,/ }; do jq -r --arg a "$a" '.agents[$a].fallback[]?' "$CONFIG"; done
+    } | sed '/^$/d' | awk '!seen[$0]++'
   else
     local tier="${TIER:-$(cfg '.default_tier // "execute"')}"
     jq -e --arg t "$tier" '.tiers[$t]' "$CONFIG" >/dev/null || die "unknown tier: $tier"

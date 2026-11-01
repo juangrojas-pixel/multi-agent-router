@@ -58,5 +58,79 @@ check "opencode does not use the plan agent" $?
 jq -e '.routing.general | test("writes") | not' "$ROOT/agents.json" >/dev/null
 check "routing does not keep writes inline" $?
 
+# --- hc (herdr-core) backend ---------------------------------------------------
+# Runs against the real hc, through a wrapper that logs every hc subcommand.
+if command -v hc >/dev/null; then
+  HCLOG="$SCRATCH/hc.log"
+  cat >"$SCRATCH/hc-wrap" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$1" >>"$HCLOG"
+exec "$(command -v hc)" "\$@"
+EOF
+  chmod +x "$SCRATCH/hc-wrap"
+  hc_cfg() { jq --arg h "$1" '.hc_command = $h' "$SCRATCH/agents.json" >"$SCRATCH/agents-hc.json"; }
+  hc_ask() { ASK_AGENT_CONFIG="$SCRATCH/agents-hc.json" "$ASK" "$@"; }
+
+  # --backend hc returns the same answer as the subprocess backend, through hc.
+  hc_cfg "$SCRATCH/hc-wrap"
+  : >"$HCLOG"
+  sub="$(hc_ask -a gentle-shell "PING" 2>/dev/null)"
+  out="$(hc_ask --backend hc -a gentle-shell "PING" 2>"$SCRATCH/err")"; rc=$?
+  [[ $rc == 0 && "$out" == "$sub" ]]; check "hc backend returns the subprocess answer" $?
+  grep -qx run "$HCLOG"; check "hc backend starts the agent with hc run" $?
+  grep -q 'hc attach aa-gentle-shell-' "$SCRATCH/err"; check "hc backend logs how to attach" $?
+  hc ls --all --json | jq -e '[.terminals[]? | select((.name // "") | startswith("aa-"))] | length == 0' >/dev/null
+  check "hc backend removes its finished terminal" $?
+
+  # Default stays the subprocess backend.
+  : >"$HCLOG"
+  hc_ask -a gentle-shell "PING" >/dev/null 2>&1
+  [[ ! -s "$HCLOG" ]]; check "default backend does not use hc" $?
+
+  # agents.json backend (global or per agent) selects hc; the flag wins.
+  jq '.backend = "hc"' "$SCRATCH/agents-hc.json" >"$SCRATCH/t.json" && mv "$SCRATCH/t.json" "$SCRATCH/agents-hc.json"
+  : >"$HCLOG"
+  hc_ask -a opencode "PING" >/dev/null 2>&1
+  grep -qx run "$HCLOG"; check "config backend hc selects hc" $?
+  : >"$HCLOG"
+  hc_ask --backend subprocess -a opencode "PING" >/dev/null 2>&1
+  [[ ! -s "$HCLOG" ]]; check "--backend subprocess overrides the config" $?
+  hc_cfg "$SCRATCH/hc-wrap"
+
+  # Exit code and stderr of the agent survive hc: a quota error on stderr sets the cooldown.
+  cat >"$SCRATCH/quota-stub" <<'EOF'
+#!/usr/bin/env bash
+echo "429 Too Many Requests" >&2; exit 1
+EOF
+  chmod +x "$SCRATCH/quota-stub"
+  jq --arg s "$SCRATCH/quota-stub" '.agents.opencode.command = $s' "$SCRATCH/agents-hc.json" >"$SCRATCH/t.json"
+  XDG_CACHE_HOME="$SCRATCH/cache-q" ASK_AGENT_CONFIG="$SCRATCH/t.json" "$ASK" --backend hc -a opencode "PING" >/dev/null 2>"$SCRATCH/err"
+  grep -q 'opencode hit a quota/rate limit' "$SCRATCH/err"; check "hc backend keeps the agent's stderr and exit code" $?
+
+  # The per-agent timeout still kills the agent under hc.
+  cat >"$SCRATCH/slow-stub" <<'EOF'
+#!/usr/bin/env bash
+sleep 60
+EOF
+  chmod +x "$SCRATCH/slow-stub"
+  jq --arg s "$SCRATCH/slow-stub" '.agents.opencode.command = $s | .agents.opencode.timeout_seconds = 2' \
+    "$SCRATCH/agents-hc.json" >"$SCRATCH/t.json"
+  start=$SECONDS
+  ASK_AGENT_CONFIG="$SCRATCH/t.json" "$ASK" --backend hc -a opencode "PING" >/dev/null 2>"$SCRATCH/err"
+  grep -q 'opencode timed out after 2s' "$SCRATCH/err" && ((SECONDS - start < 20)); check "hc backend enforces the timeout" $?
+  hc ls --all --json | jq -e '[.terminals[]? | select((.name // "") | startswith("aa-"))] | length == 0' >/dev/null
+  check "hc backend removes a timed-out terminal" $?
+
+  # No usable hc: fall back to the subprocess backend.
+  hc_cfg "$SCRATCH/no-such-hc"
+  out="$(hc_ask --backend hc -a gentle-shell "PING" 2>"$SCRATCH/err")"
+  [[ "$out" == "$sub" ]] && grep -q 'falling back to subprocess' "$SCRATCH/err"; check "missing hc falls back to subprocess" $?
+else
+  echo "SKIP: hc not installed, hc backend tests not run"
+fi
+
+# Unknown backend is rejected.
+"$ASK" --backend nope -a codex "PING" >/dev/null 2>&1; [[ $? == 2 ]]; check "unknown backend is rejected" $?
+
 echo "ask-agent: $pass passed, $fail failed"
 ((fail == 0))

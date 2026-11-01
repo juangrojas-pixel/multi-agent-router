@@ -8,6 +8,7 @@
 #   ask-agent status                                              readiness, tiers, agy quota
 #   ask-agent reset [AGENT]                                       clear cooldowns
 # Tiers: think | execute | draft (see agents.json). Prompt is read from stdin if omitted.
+# --backend hc|subprocess: run agents in live hc (herdr-core) terminals or as plain subprocesses.
 set -uo pipefail
 
 SELF="$(perl -MCwd=abs_path -le 'print abs_path(shift)' "${BASH_SOURCE[0]}")"
@@ -18,6 +19,9 @@ COOLDOWN_FILE="$STATE_DIR/cooldown.json"
 QUOTA_ERROR_RE='rate.?limit|quota|429|resource.?exhausted|usage limit|too many requests|limit reached'
 
 log() { printf '[ask-agent] %s\n' "$*" >&2; }
+# Progress notes reach the caller's stderr even while an agent's stderr is captured.
+exec 3>&2
+note() { log "$@" 2>&3; }
 die() { log "error: $*"; exit 2; }
 
 # Agents run shell commands on their own (agy in -p mode does); refuse nested
@@ -109,6 +113,69 @@ with_timeout() {
   ' "$secs" "$@"
 }
 
+# Runs a command like with_timeout, but inside a live hc (herdr-core) terminal
+# that can be watched with `hc attach <name>` while it works. stdout, stderr and
+# the exit code are captured to files, so the caller sees exactly what a
+# subprocess run gives. Falls back to with_timeout when hc cannot start it.
+hc_exec() {
+  local secs="$1"; shift
+  local hc name d res addr deadline left t0
+  hc="$(cfg '.hc_command // "hc"')"
+  name="aa-${RUN_NAME:-run}-${BASHPID}"
+  name="${name:0:32}"
+  d="$(mktemp -d)"
+  env -0 >"$d/env"
+  cat >"$d/run" <<'EOF'
+d="$1"; shift
+while IFS= read -r -d '' kv; do export "$kv" 2>/dev/null; done <"$d/env"
+"$@" </dev/null 2> >(tee "$d/err" >&2) | tee "$d/out"
+rc=${PIPESTATUS[0]}
+wait $! 2>/dev/null
+printf '%s\n' "$rc" >"$d/rc.tmp" && mv "$d/rc.tmp" "$d/rc"
+EOF
+  res="$("$hc" run --bg --json --no-parent --no-notify --name "$name" --label ask-agent=1 \
+    --cwd "$PWD" -- bash "$d/run" "$d" "$@" 2>&1)"
+  addr="$(jq -r '.address // empty' <<<"$res" 2>/dev/null)"
+  if [[ -z "$addr" ]]; then
+    note "hc unavailable ($(tail -n 1 <<<"$res")), falling back to subprocess"
+    rm -rf "$d"
+    with_timeout "$secs" "$@"
+    return
+  fi
+  note "running in hc terminal $addr: hc attach $name"
+  deadline=$(($(now) + secs))
+  while [[ ! -s "$d/rc" ]]; do
+    left=$((deadline - $(now)))
+    if ((left <= 0)); then
+      "$hc" kill "$addr" >/dev/null 2>&1
+      "$hc" rm "$addr" >/dev/null 2>&1
+      rm -rf "$d"
+      return 142
+    fi
+    t0=$SECONDS
+    "$hc" wait "$addr" --json --timeout "$((left < 60 ? left : 60))" >/dev/null 2>&1
+    [[ -s "$d/rc" ]] && break
+    # Ended without writing rc (killed from outside, hc lost it): stop waiting.
+    if [[ "$("$hc" get "$addr" --json 2>/dev/null | jq -r '.state // empty')" != live ]]; then
+      sleep 1
+      [[ -s "$d/rc" ]] || { log "hc terminal $addr ended without an exit code"; rm -rf "$d"; return 1; }
+    fi
+    ((SECONDS - t0 >= 1)) || sleep 1 # wait returns early for agent turns; never spin
+  done
+  cat "$d/out"
+  cat "$d/err" >&2
+  local rc
+  rc="$(<"$d/rc")"
+  "$hc" rm "$addr" >/dev/null 2>&1
+  rm -rf "$d"
+  return "$rc"
+}
+
+# Runs an agent command on the selected backend (BACKEND: hc or subprocess).
+run_cmd() {
+  if [[ "${BACKEND:-subprocess}" == hc ]]; then hc_exec "$@"; else with_timeout "$@"; fi
+}
+
 # --- agy quota ----------------------------------------------------------------
 
 agy_usage_json() {
@@ -181,6 +248,9 @@ run_agent() {
   cmd="$(agent_cfg "$agent" .command)"
   [[ -n "$model" ]] || model="$(agent_cfg "$agent" '.model // empty')"
   secs="$(agent_cfg "$agent" '.timeout_seconds // 600')"
+  # Backend: --backend flag, then the agent's, then the global one, then subprocess.
+  local BACKEND="${BACKEND_FLAG:-}" RUN_NAME="$agent"
+  [[ -n "$BACKEND" ]] || BACKEND="$(jq -r --arg a "$agent" '.agents[$a].backend // .backend // "subprocess"' "$CONFIG")"
   local preamble
   # Per-agent preamble (executors) wins over the global read-only one (advisors).
   preamble="$(jq -r --arg a "$agent" '.agents[$a].prompt_preamble // .prompt_preamble // empty' "$CONFIG")"
@@ -192,20 +262,20 @@ run_agent() {
   t0="$(now)"
   case "$agent" in
     codex)
-      out="$(with_timeout "$secs" "$cmd" -p --no-session --no-extensions --no-skills --no-context-files \
+      out="$(run_cmd "$secs" "$cmd" -p --no-session --no-extensions --no-skills --no-context-files \
         ${model:+--model "$model"} ${args[@]+"${args[@]}"} "$prompt" 2>"$err")"
       rc=$?
       answer="$out"
       ;;
     agy)
-      out="$(with_timeout "$((secs + 30))" "$cmd" -p "$prompt" --output-format json --print-timeout "${secs}s" \
+      out="$(run_cmd "$((secs + 30))" "$cmd" -p "$prompt" --output-format json --print-timeout "${secs}s" \
         ${model:+--model "$model"} ${args[@]+"${args[@]}"} 2>"$err")"
       rc=$?
       answer=""
       [[ "$(jq -r '.status // empty' <<<"$out" 2>/dev/null)" == "SUCCESS" ]] && answer="$(jq -r '.response // empty' <<<"$out")"
       ;;
     opencode)
-      out="$(with_timeout "$secs" "$cmd" run --format json ${model:+-m "$model"} ${args[@]+"${args[@]}"} \
+      out="$(run_cmd "$secs" "$cmd" run --format json ${model:+-m "$model"} ${args[@]+"${args[@]}"} \
         "$prompt" 2>"$err")"
       rc=$?
       answer="$(jq -rj 'select(.type == "text") | .part.text // empty' <<<"$out" 2>/dev/null)"
@@ -213,7 +283,7 @@ run_agent() {
       jq -e 'select(.type == "error")' <<<"$out" >/dev/null 2>&1 && answer=""
       ;;
     gentle-shell)
-      out="$(with_timeout "$secs" "$cmd" -- -p --no-session ${model:+--model "$model"} ${args[@]+"${args[@]}"} \
+      out="$(run_cmd "$secs" "$cmd" -- -p --no-session ${model:+--model "$model"} ${args[@]+"${args[@]}"} \
         "$prompt" 2>"$err")"
       rc=$?
       answer="$out"
@@ -255,15 +325,18 @@ attempt() {
 
 # Sets globals: TIER AGENTS MODEL PROMPT (and cds into -C DIR).
 parse_args() {
-  TIER="" AGENTS="" MODEL="" PROMPT=""
+  TIER="" AGENTS="" MODEL="" PROMPT="" BACKEND_FLAG=""
   local dir=""
   while (($#)); do
     case "$1" in
+      --backend)
+        [[ "${2:-}" == hc || "${2:-}" == subprocess ]] || die "unknown backend: ${2:-} (use hc or subprocess)"
+        BACKEND_FLAG="$2"; shift 2 ;;
       -t|--tier) TIER="$2"; shift 2 ;;
       -a|--agent) AGENTS="$2"; shift 2 ;;
       -m|--model) MODEL="$2"; shift 2 ;;
       -C|--cwd) dir="$2"; shift 2 ;;
-      -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
       --) shift; PROMPT="$*"; break ;;
       -*) die "unknown option: $1" ;;
       *) PROMPT="$*"; break ;;

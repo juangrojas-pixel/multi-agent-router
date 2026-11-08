@@ -7,6 +7,7 @@
 #   ask-agent parallel [-t TIER | -a A,B] [-C DIR] [PROMPT]       every ready agent answers
 #   ask-agent status                                              readiness, tiers, agy quota
 #   ask-agent reset [AGENT]                                       clear cooldowns
+#   ask-agent runs [N] [-a AGENT]                                 run history (runs.jsonl)
 # Tiers: think | execute | draft (see agents.json). Prompt is read from stdin if omitted.
 # --backend hc|subprocess: run agents in live hc (herdr-core) terminals or as plain subprocesses.
 set -uo pipefail
@@ -242,9 +243,49 @@ record_last_run() {
   fi
 }
 
+# Prints the working tree state of the current git repo (HEAD, then porcelain
+# status lines), or nothing outside a repo. Used to diff before/after a run.
+git_snapshot() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  GIT_OPTIONAL_LOCKS=0 git rev-parse HEAD 2>/dev/null || echo "-"
+  GIT_OPTIONAL_LOCKS=0 git status --porcelain=v1 --untracked-files=all 2>/dev/null
+}
+
+# Prints, one per line, the repo paths that changed between two snapshots:
+# new or different status lines plus files touched by commits made in between.
+changed_files() {
+  local before="$1" after="$2" h0 h1
+  [[ -n "$after" ]] || return 0
+  h0="$(head -n 1 <<<"$before")" h1="$(head -n 1 <<<"$after")"
+  {
+    comm -13 <(tail -n +2 <<<"$before" | sort) <(tail -n +2 <<<"$after" | sort) | cut -c4- | sed 's/.* -> //'
+    if [[ "$h0" != "$h1" && "$h0" != "-" && "$h1" != "-" ]]; then
+      git diff --name-only "$h0" "$h1" 2>/dev/null
+    fi
+  } | sed '/^$/d' | sort -u | head -n 200
+}
+
+# Appends one JSON line per agent run to runs.jsonl, the history of what each
+# agent was asked, where it ran, how it ended and which files it changed.
+record_run() {
+  local agent="$1" tier="$2" model="$3" ts="$4" rc="$5" secs="$6" prompt="$7" ans="$8" files="$9" line
+  mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+  line="$(jq -cn \
+    --arg agent "$agent" --arg tier "$tier" --arg model "$model" --arg cwd "$(pwd -P)" \
+    --argjson ts "$ts" --argjson exit "$rc" --argjson seconds "$secs" \
+    --arg prompt "${prompt:0:2000}" --argjson prompt_chars "${#prompt}" \
+    --arg answer "${ans:0:2000}" --arg files "$files" \
+    '{ts: $ts, agent: $agent, tier: $tier, model: $model, cwd: $cwd, exit: $exit, seconds: $seconds,
+      prompt: $prompt, prompt_chars: $prompt_chars, answer: $answer,
+      changed_files: ($files | split("\n") | map(select(length > 0)))}' 2>/dev/null)" || return 0
+  # One write per line keeps parallel runs from interleaving records.
+  printf '%s\n' "$line" >>"$STATE_DIR/runs.jsonl" 2>/dev/null || true
+}
+
 # Runs the agent; answer on stdout. Exit 0 ok, 3 quota error, 1 other failure.
 run_agent() {
-  local agent="$1" prompt="$2" model="$3" cmd out err rc arg secs answer t0 t1
+  local agent="$1" prompt="$2" model="$3" cmd out err rc arg secs answer t0 t1 snap0 snap1
+  local task="$2"
   cmd="$(agent_cfg "$agent" .command)"
   [[ -n "$model" ]] || model="$(agent_cfg "$agent" '.model // empty')"
   secs="$(agent_cfg "$agent" '.timeout_seconds // 600')"
@@ -259,6 +300,7 @@ run_agent() {
   while IFS= read -r arg; do [[ -n "$arg" ]] && args+=("$arg"); done < <(agent_cfg "$agent" '.extra_args[]?')
 
   err="$(mktemp)"
+  snap0="$(git_snapshot)"
   t0="$(now)"
   case "$agent" in
     codex)
@@ -294,6 +336,9 @@ run_agent() {
   rm -f "$err"
   t1="$(now)"
   record_last_run "$agent" "${TIER:-}" "$t1" "$rc" "$((t1 - t0))" "${answer:-$out}" 2>/dev/null || true
+  snap1="$(git_snapshot)"
+  record_run "$agent" "${TIER:-}" "$model" "$t1" "$rc" "$((t1 - t0))" "$task" "${answer:-$out}" \
+    "$(changed_files "$snap0" "$snap1")" 2>/dev/null || true
 
   if ((rc == 0)) && [[ -n "${answer//[[:space:]]/}" ]]; then
     printf '%s\n' "$answer"
@@ -336,7 +381,7 @@ parse_args() {
       -a|--agent) AGENTS="$2"; shift 2 ;;
       -m|--model) MODEL="$2"; shift 2 ;;
       -C|--cwd) dir="$2"; shift 2 ;;
-      -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
       --) shift; PROMPT="$*"; break ;;
       -*) die "unknown option: $1" ;;
       *) PROMPT="$*"; break ;;
@@ -386,6 +431,26 @@ cmd_ask() {
     attempt "$a" "$PROMPT" "$MODEL" && return 0
   done
   die "no agent could answer (tried: ${list[*]})"
+}
+
+# Lists the run history: the last N runs (default 20), optionally of one agent.
+cmd_runs() {
+  local n=20 agent="" file="$STATE_DIR/runs.jsonl"
+  while (($#)); do
+    case "$1" in
+      -a|--agent)
+        [[ -n "${2:-}" ]] || die "usage: ask-agent runs [N] [-a AGENT]"
+        agent="$2"; shift 2 ;;
+      ''|*[!0-9]*) die "usage: ask-agent runs [N] [-a AGENT]" ;;
+      *) n="$1"; shift ;;
+    esac
+  done
+  [[ -s "$file" ]] || { log "no runs recorded yet ($file)"; return 0; }
+  # Lines that are not valid JSON (a torn write) are skipped, not fatal.
+  jq -rR --arg a "$agent" 'fromjson? // empty | select($a == "" or .agent == $a)
+    | [(.ts | strftime("%Y-%m-%d %H:%M")), .agent, "exit=\(.exit)", "\(.seconds)s",
+       "files=\(.changed_files | length)", .cwd, (.prompt | gsub("\\s+"; " ") | .[0:80])] | @tsv' "$file" |
+    tail -n "$n"
 }
 
 cmd_parallel() {
@@ -443,5 +508,6 @@ case "${1:-}" in
   status) cmd_status ;;
   reset) clear_cooldown "${2:-}"; log "cooldown cleared ${2:-for all agents}" ;;
   parallel) shift; cmd_parallel "$@" ;;
+  runs) shift; cmd_runs "$@" ;;
   *) cmd_ask "$@" ;;
 esac

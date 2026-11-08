@@ -144,6 +144,42 @@ jq --arg q "$QUOTA_STUB" '.agents.codex.command = $q' "$ASK_AGENT_CONFIG" >"$SCR
 XDG_CACHE_HOME="$SCRATCH/cache-nofb" ASK_AGENT_CONFIG="$SCRATCH/nofb.json" "$ASK" -a codex "PING" >/dev/null 2>&1
 [[ $? != 0 ]]; check "agent without fallback still fails" $?
 
+# Every run is appended to runs.jsonl with its directory, exit, prompt and the files it changed.
+WRITER="$SCRATCH/writer-stub"
+printf '#!/usr/bin/env bash\necho hi >made.txt\necho "wrote made.txt"\n' >"$WRITER"
+chmod +x "$WRITER"
+jq --arg w "$WRITER" '.agents."gentle-shell".command = $w' "$ASK_AGENT_CONFIG" >"$SCRATCH/writer.json"
+REPO="$SCRATCH/repo"
+git init -q "$REPO" && git -C "$REPO" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+RUNS="$SCRATCH/cache-runs/multi-agent-router/runs.jsonl"
+XDG_CACHE_HOME="$SCRATCH/cache-runs" ASK_AGENT_CONFIG="$SCRATCH/writer.json" \
+  "$ASK" -a gentle-shell -C "$REPO" "WRITE TASK" >/dev/null 2>&1
+[[ "$(wc -l <"$RUNS")" -eq 1 ]]; check "a run appends one line to runs.jsonl" $?
+jq -e --arg d "$(cd "$REPO" && pwd -P)" '.agent == "gentle-shell" and .exit == 0 and .cwd == $d
+  and (.prompt | contains("WRITE TASK")) and (.answer | contains("wrote made.txt"))' "$RUNS" >/dev/null
+check "run record has agent, cwd, exit, prompt and answer" $?
+jq -e '.changed_files == ["made.txt"]' "$RUNS" >/dev/null; check "run record lists the files the agent changed" $?
+# A failed attempt is recorded too, and the history keeps both runs.
+XDG_CACHE_HOME="$SCRATCH/cache-runs" ASK_AGENT_CONFIG="$SCRATCH/nofb.json" "$ASK" -a codex "PING" >/dev/null 2>&1
+[[ "$(wc -l <"$RUNS")" -eq 2 ]] && jq -se '.[1].agent == "codex" and .[1].exit != 0' "$RUNS" >/dev/null
+check "failed runs are recorded and history is kept" $?
+# `ask-agent runs` lists the history, newest last, filterable by agent.
+out="$(XDG_CACHE_HOME="$SCRATCH/cache-runs" "$ASK" runs 2>&1)"
+[[ "$out" == *"gentle-shell"*"codex"* && "$out" == *"WRITE TASK"* ]]; check "runs lists the history" $?
+out="$(XDG_CACHE_HOME="$SCRATCH/cache-runs" "$ASK" runs -a codex 2>&1)"
+[[ "$out" == *"codex"* && "$out" != *"gentle-shell"* ]]; check "runs -a filters by agent" $?
+out="$(XDG_CACHE_HOME="$SCRATCH/cache-runs" "$ASK" runs 1 2>&1)"
+[[ "$out" == *"codex"* && "$out" != *"WRITE TASK"* ]]; check "runs N shows only the last N" $?
+# `runs -a` without a value fails fast instead of looping.
+XDG_CACHE_HOME="$SCRATCH/cache-runs" timeout 5 "$ASK" runs -a >/dev/null 2>&1
+[[ $? == 2 ]]; check "runs -a without a value exits 2" $?
+# A corrupt line in runs.jsonl does not break the listing.
+echo '{"broken' >>"$RUNS"
+out="$(XDG_CACHE_HOME="$SCRATCH/cache-runs" "$ASK" runs 2>&1)"
+[[ "$out" == *"gentle-shell"*"codex"* ]]; check "runs skips corrupt lines" $?
+# The last/ snapshot per agent still exists (previous behavior).
+[[ -s "$SCRATCH/cache-runs/multi-agent-router/last/gentle-shell.json" ]]; check "last/ snapshot still written" $?
+
 # Unknown backend is rejected.
 "$ASK" --backend nope -a codex "PING" >/dev/null 2>&1; [[ $? == 2 ]]; check "unknown backend is rejected" $?
 

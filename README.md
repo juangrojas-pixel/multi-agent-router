@@ -28,7 +28,14 @@ ask-agent -a opencode "draft a README"   # force one agent
 ask-agent parallel -t think "question"   # every ready agent, one section each
 ask-agent reset [agent]                  # clear cooldowns
 ask-agent --backend hc -a codex "question"   # run the agent in a live hc terminal
+ask-agent runs [N] [-a agent]            # run history, last N (default 20)
 ```
+
+### Run history
+
+Every agent run, successful or not, appends one JSON line to `~/.cache/multi-agent-router/runs.jsonl` (`$XDG_CACHE_HOME` honored): `ts`, `agent`, `tier`, `model`, `cwd`, `exit`, `seconds`, `prompt` (task without the preamble, first 2000 chars), `prompt_chars`, `answer` (first 2000 chars) and `changed_files`.
+
+`changed_files` lists the paths of the run's git repo that changed during the run: new or different `git status` entries plus files in commits made during the run. It is empty outside a git repo. A file that was already modified before the run and is modified again does not show up. `last/<agent>.json` still keeps the latest run of each agent.
 
 ### hc backend (herdr-core)
 

@@ -6,7 +6,7 @@ See `contracts/cli.md` for exact messages and `data-model.md` for the config sha
 ## 1. Automated checks
 
 ```bash
-node --test tests/                                           # new unit and CLI tests
+node --test tests/*.test.ts                                     # new unit and CLI tests
 ASK_AGENT_BIN=bin/ask-agent-ts bash tests/ask-agent.test.sh  # parity with the bash router
 bash tests/ask-agent.test.sh                                 # bash router still passes
 tests/route-hint.test.sh

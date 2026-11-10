@@ -3,7 +3,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ASK="$ROOT/bin/ask-agent"
+ASK="${ASK_AGENT_BIN:-$ROOT/bin/ask-agent}"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 export XDG_CACHE_HOME="$SCRATCH/cache"

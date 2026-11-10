@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Stand-in for agy: `-p PROMPT --output-format json ...`. Answers /usage from $STUB_USAGE.
+if [[ "${2:-}" == "/usage" ]]; then
+  cat "$STUB_USAGE"
+  exit 0
+fi
+printf '{"status":"SUCCESS","response":"%s"}\n' "${2:-}"

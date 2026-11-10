@@ -2,7 +2,7 @@
 
 Objective: declare named roles in config (role -> agents -> model -> effort), run tasks by role with fallback, make the orchestrator a role any agent can hold, and keep site policy in a private file; reimplemented in TypeScript next to the untouched bash router.
 Branch: `feat/router`. Delivery strategy: `ask-on-risk`. Forecast: about 1,200 authored lines plus tests, over the 400-line budget, so it ships as one commit per phase.
-Test runner: `node --test tests/` and `ASK_AGENT_BIN=bin/ask-agent-ts bash tests/ask-agent.test.sh`; also `tests/route-hint.test.sh`.
+Test runner: `node --test tests/*.test.ts` and `ASK_AGENT_BIN=bin/ask-agent-ts bash tests/ask-agent.test.sh`; also `tests/route-hint.test.sh`.
 
 ## Specs
 
@@ -20,7 +20,7 @@ The full specification is `specs/001-role-based-routing/` (spec.md, plan.md, res
 
 Task IDs are those of `specs/001-role-based-routing/tasks.md`. One line per phase.
 
-- [ ] P1-P2 Setup and foundation, T001-T010 (S6). Route: delegated (context backstop: long parent session). Commit: pending
+- [x] P1-P2 Setup and foundation, T001-T010 (S6). Route: delegated to gentle-shell (context backstop), finished inline after it ran out of quota. Commit: see L7
 - [ ] P3 Run by role, T011-T015 (S1). Route: pending. Commit: pending
 - [ ] P4 Fallback in a role, T016-T017 (S2). Route: pending. Commit: pending
 - [ ] P5 List and validate, T018-T021 (S3). Route: pending. Commit: pending
@@ -36,4 +36,5 @@ Task IDs are those of `specs/001-role-based-routing/tasks.md`. One line per phas
 - L4 (2026-11-10, user): constitution accepted ("si"); orchestrator scope "B" (a second orchestrator must work).
 - L5 (2026-11-10): analysis found two critical ordering defects (adapters calling a command the bash router lacks; client preambles removed while bash is still in use). User approved the fixes ("si"); tasks renumbered to T001-T039.
 - L6 (2026-11-10): evidence. Node 24.13 runs `.ts` files and `node --test` directly (checked). `bin/ask-agent:305` hard-codes each agent's argument shape. `date -r EPOCH` at `bin/ask-agent:77,208` fails under GNU date; not fixed in bash, new code formats times itself.
-- Next step: Phases 1 and 2.
+- L7 (2026-11-10): P1-P2 done. gentle-shell wrote the foundation and hit its usage limit before sending a receipt; the parent measured the result and added the missing proactive agy quota check with tests (RED 2 of 3 failing, then GREEN). Observed: `node --test tests/*.test.ts` 9 passed, 0 failed; `ASK_AGENT_BIN=bin/ask-agent-ts bash tests/ask-agent.test.sh` 33 passed, 2 failed; `bash tests/ask-agent.test.sh` 33 passed, 2 failed (the same two hc checks fail on the untouched bash router: "hc backend removes its finished terminal", "hc backend removes a timed-out terminal"); `tests/route-hint.test.sh` 35 passed, 0 failed. Runner corrected: `node --test tests/` does not expand a directory here, use the glob. Risk: item 4 (cooldown lock reimplemented over a file shared with the bash router); independent verifier deferred to before T037, nothing uses the new entry until then.
+- Next step: Phase 3 (T011-T015).

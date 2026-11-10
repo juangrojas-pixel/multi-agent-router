@@ -8,23 +8,23 @@
 before its implementation. Tests go through the CLI and use stub agents from
 `tests/fixtures/`; no real agent CLI is ever called.
 
-**Runner**: `node --test tests/` and `ASK_AGENT_BIN=bin/ask-agent-ts bash tests/ask-agent.test.sh`
+**Runner**: `node --test tests/*.test.ts` and `ASK_AGENT_BIN=bin/ask-agent-ts bash tests/ask-agent.test.sh`
 
 ## Phase 1: Setup
 
-- [ ] T001 Create `src/`, `adapters/gentle-shell/`, `tests/fixtures/` and the executable `bin/ask-agent-ts` that runs `src/cli.ts` with `node`, resolving its own real path through symlinks
-- [ ] T002 [P] Add stub agents to `tests/fixtures/`: `stub-ok` (echoes its last argument), `stub-quota` (prints a quota error and exits non-zero), `stub-fail` (exits 1), `stub-slow` (sleeps past the timeout), `stub-argv` (prints every argument it received, one per line), plus `tests/fixtures/helpers.ts` that builds a scratch config, sets `ASK_AGENT_CONFIG`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` to `mktemp -d` paths and runs the CLI returning stdout, stderr and exit status
-- [ ] T003 [P] Make `tests/ask-agent.test.sh` run the binary named by `ASK_AGENT_BIN` (default `bin/ask-agent`), with no other change to its 35 checks
+- [x] T001 Create `src/`, `adapters/gentle-shell/`, `tests/fixtures/` and the executable `bin/ask-agent-ts` that runs `src/cli.ts` with `node`, resolving its own real path through symlinks
+- [x] T002 [P] Add stub agents to `tests/fixtures/`: `stub-ok` (echoes its last argument), `stub-quota` (prints a quota error and exits non-zero), `stub-fail` (exits 1), `stub-slow` (sleeps past the timeout), `stub-argv` (prints every argument it received, one per line), plus `tests/fixtures/helpers.ts` that builds a scratch config, sets `ASK_AGENT_CONFIG`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` to `mktemp -d` paths and runs the CLI returning stdout, stderr and exit status
+- [x] T003 [P] Make `tests/ask-agent.test.sh` run the binary named by `ASK_AGENT_BIN` (default `bin/ask-agent`), with no other change to its 35 checks
 
 ## Phase 2: Foundational (blocks every story)
 
-- [ ] T004 Write failing tests in `tests/foundation.test.ts`: default ask by `-a` and by `-t` returns the stub's answer on stdout with exit 0; `-t` with `-a` exits 2; missing config exits 2; a call with `ASK_AGENT_DEPTH` set exits 2; an unported command (`status`) produces the same output as `bin/ask-agent`
-- [ ] T005 Implement config loading in `src/config.ts`: read `ASK_AGENT_CONFIG` or the repository `agents.json`, return typed config, and report unreadable or invalid JSON as `[ask-agent] config: <path>: <message>` with exit 2
-- [ ] T006 Implement agent start shape in `src/agents.ts`: `args` template with `{prompt}`, `{timeout}`, `{model_args}`, `{effort_args}`, `{extra_args}`; `model_args` and `effort_args` fragments added only when a value is set; `output` parsers `text`, `agy-json` (answer is `.response` only when `.status=="SUCCESS"`), `opencode-events` (concatenated `.part.text` of `type=="text"`, emptied by any `type=="error"`); built-in defaults for ids `codex`, `agy`, `opencode`, `gentle-shell` equal to `bin/ask-agent:305-334`; `prompt_preamble` joined to the prompt with a blank line
-- [ ] T007 Implement state in `src/state.ts`: `cooldown.json` as `{"<agent id>": <until epoch>}` written under the `cooldown.json.lock` directory lock (stale after 30 s) with temp file then rename; `runs.jsonl` records with the existing fields; `last/<agent>.json`; all under `${XDG_CACHE_HOME:-~/.cache}/multi-agent-router/`
-- [ ] T008 Implement the run engine in `src/run.ts`: start the agent in its own process group with stdin from `/dev/null`, enforce `timeout_seconds` (default 600) with TERM then KILL to the group, detect quota errors with the existing pattern and set cooldown for `cooldown_seconds`, treat exit 0 with an empty answer as failure, and try candidates in order until one succeeds
-- [ ] T009 Implement `src/cli.ts`: parse the existing flags exactly as `contracts/cli.md` "Existing" states, run the default ask by agent (named agents then each one's `fallback`, deduplicated) and by tier, refuse nested calls, and hand `parallel`, `status`, `reset`, `runs` and `--backend hc` to `bin/ask-agent` with the original arguments
-- [ ] T010 Run `ASK_AGENT_BIN=bin/ask-agent-ts bash tests/ask-agent.test.sh` and `node --test tests/`; fix differences until both pass
+- [x] T004 Write failing tests in `tests/foundation.test.ts`: default ask by `-a` and by `-t` returns the stub's answer on stdout with exit 0; `-t` with `-a` exits 2; missing config exits 2; a call with `ASK_AGENT_DEPTH` set exits 2; an unported command (`status`) produces the same output as `bin/ask-agent`
+- [x] T005 Implement config loading in `src/config.ts`: read `ASK_AGENT_CONFIG` or the repository `agents.json`, return typed config, and report unreadable or invalid JSON as `[ask-agent] config: <path>: <message>` with exit 2
+- [x] T006 Implement agent start shape in `src/agents.ts`: `args` template with `{prompt}`, `{timeout}`, `{model_args}`, `{effort_args}`, `{extra_args}`; `model_args` and `effort_args` fragments added only when a value is set; `output` parsers `text`, `agy-json` (answer is `.response` only when `.status=="SUCCESS"`), `opencode-events` (concatenated `.part.text` of `type=="text"`, emptied by any `type=="error"`); built-in defaults for ids `codex`, `agy`, `opencode`, `gentle-shell` equal to `bin/ask-agent:305-334`; `prompt_preamble` joined to the prompt with a blank line
+- [x] T007 Implement state in `src/state.ts`: `cooldown.json` as `{"<agent id>": <until epoch>}` written under the `cooldown.json.lock` directory lock (stale after 30 s) with temp file then rename; `runs.jsonl` records with the existing fields; `last/<agent>.json`; all under `${XDG_CACHE_HOME:-~/.cache}/multi-agent-router/`
+- [x] T008 Implement the run engine in `src/run.ts`: start the agent in its own process group with stdin from `/dev/null`, enforce `timeout_seconds` (default 600) with TERM then KILL to the group, detect quota errors with the existing pattern and set cooldown for `cooldown_seconds`, treat exit 0 with an empty answer as failure, and try candidates in order until one succeeds
+- [x] T009 Implement `src/cli.ts`: parse the existing flags exactly as `contracts/cli.md` "Existing" states, run the default ask by agent (named agents then each one's `fallback`, deduplicated) and by tier, refuse nested calls, and hand `parallel`, `status`, `reset`, `runs` and `--backend hc` to `bin/ask-agent` with the original arguments
+- [x] T010 Run `ASK_AGENT_BIN=bin/ask-agent-ts bash tests/ask-agent.test.sh` and `node --test tests/*.test.ts`; fix differences until both pass
 
 **Checkpoint**: the new entry behaves like the bash router for everything it accepts.
 

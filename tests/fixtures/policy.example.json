@@ -1,0 +1,13 @@
+{
+  "agents": {
+    "gentle-shell": {
+      "prompt_preamble": "Site rules: never restart a production service without the person's explicit yes in this conversation."
+    }
+  },
+  "roles": {
+    "coder": { "description": "Writes and edits code for this site's repositories from a clear task." }
+  },
+  "routing": {
+    "notes": "Secrets stay with the orchestrator. Work on production servers needs the person's explicit yes."
+  }
+}

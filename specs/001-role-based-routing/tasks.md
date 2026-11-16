@@ -88,9 +88,9 @@ before its implementation. Tests go through the CLI and use stub agents from
 
 **Independent test**: same task with and without the private file; the preamble arrives only with it.
 
-- [ ] T029 [US5] Write failing tests in `tests/policy.test.ts`: a `policy.json` under `$XDG_CONFIG_HOME/multi-agent-router/` adds a `prompt_preamble` that reaches the stub; `ASK_AGENT_POLICY` overrides the path; a missing file is no error; objects merge key by key while scalars and arrays from the private file replace; invalid JSON or a failing rule exits 2 naming the file path and key
-- [ ] T030 [US5] Implement the private policy merge in `src/config.ts`, validating the merged result
-- [ ] T031 [US5] Add `tests/fixtures/policy.example.json` as a neutral example and document the private policy file in `README.md`. Do NOT remove anything from `agents.json` here: the bash router in daily use does not read the private file (see T039)
+- [x] T029 [US5] Write failing tests in `tests/policy.test.ts`: a `policy.json` under `$XDG_CONFIG_HOME/multi-agent-router/` adds a `prompt_preamble` that reaches the stub; `ASK_AGENT_POLICY` overrides the path; a missing file is no error; objects merge key by key while scalars and arrays from the private file replace; invalid JSON or a failing rule exits 2 naming the file path and key
+- [x] T030 [US5] Implement the private policy merge in `src/config.ts`, validating the merged result
+- [x] T031 [US5] Add `tests/fixtures/policy.example.json` as a neutral example and document the private policy file in `README.md`. Do NOT remove anything from `agents.json` here: the bash router in daily use does not read the private file (see T039)
 
 **Checkpoint**: the private file works; the repository config is still complete for the bash router.
 

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { loadConfig, validateConfig, type Config } from "./config.ts";
+import { loadConfig, loadPolicy, mergeConfig, validateConfig, type Config } from "./config.ts";
 import { guidance } from "./guidance.ts";
 import { listRoles, resolveRole, runRole, type RoleEntry } from "./roles.ts";
 import { available, runAgent } from "./run.ts";
@@ -27,6 +27,15 @@ try {
 }
 const mistake = validateConfig(config);
 if (mistake) fail(`config: ${mistake}`);
+// The private policy is merged over the repository config; a mistake that appears only after
+// the merge is reported with the policy file's path, since that file caused it.
+let policy: ReturnType<typeof loadPolicy> = null;
+try { policy = loadPolicy(); } catch (error) { fail(`config: ${(error as Error).message}`); }
+if (policy) {
+  config = mergeConfig(config, policy.data);
+  const merged = validateConfig(config);
+  if (merged) fail(`config: ${policy.path}: ${merged}`);
+}
 
 if (original[0] === "roles") {
   process.stdout.write(listRoles(config));

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 export type Agent = {
   enabled?: boolean; command: string; model?: string | null; timeout_seconds?: number;
@@ -47,6 +47,40 @@ export function validateConfig(config: Config): string | null {
     if (rule.role !== undefined && !config.roles?.[rule.role]) return `routing.rules[${index}].role: unknown role: ${rule.role}`;
   }
   return null;
+}
+
+// The private policy file: site text kept outside the repository, merged over agents.json.
+export function policyPath(): string {
+  if (process.env.ASK_AGENT_POLICY) return process.env.ASK_AGENT_POLICY;
+  const base = process.env.XDG_CONFIG_HOME || join(process.env.HOME || "/tmp", ".config");
+  return join(base, "multi-agent-router", "policy.json");
+}
+
+// Reads the private policy file; null when it does not exist. Errors name the file.
+export function loadPolicy(): { path: string; data: Record<string, unknown> } | null {
+  const path = policyPath();
+  let text: string;
+  try { text = readFileSync(path, "utf8"); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new Error(`${path}: ${(error as Error).message}`);
+  }
+  let data: unknown;
+  try { data = JSON.parse(text); } catch (error) { throw new Error(`${path}: ${(error as Error).message}`); }
+  if (!isObject(data)) throw new Error(`${path}: not a JSON object`);
+  return { path, data };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// Objects merge key by key; scalars and arrays from `over` replace those of `base`.
+export function mergeConfig<T>(base: T, over: Record<string, unknown>): T {
+  const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
+  for (const [key, value] of Object.entries(over)) {
+    out[key] = isObject(value) && isObject(out[key]) ? mergeConfig(out[key], value) : value;
+  }
+  return out as T;
 }
 
 export function configPath(): string { return process.env.ASK_AGENT_CONFIG || resolve(import.meta.dirname, "../agents.json"); }

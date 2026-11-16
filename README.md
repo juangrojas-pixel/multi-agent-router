@@ -76,6 +76,12 @@ Two adapters deliver that same text and hold no rule, role or agent name of thei
 
 A `routing.rules` entry names an `agent` (directive `ask-agent -a AGENT`) or a `role` (directive `ask-agent-ts -r ROLE`); the directive template takes `{call}` for that command, plus `{rule}`, `{agent}` (the agent or role name) and `{verify}`. A role rule skips delegation only when every agent of the role is in cooldown.
 
+### Private policy file
+
+Site-specific text (client guards, confirmation protocols, client preambles) can live outside the repository in `${XDG_CONFIG_HOME:-~/.config}/multi-agent-router/policy.json`, or the path in `ASK_AGENT_POLICY`. It has the same shape as `agents.json` and is merged over it by the TypeScript router: objects merge key by key, scalars and arrays from the private file replace. A missing file is not an error. Invalid JSON, a file that is not a JSON object, or a mistake that appears only after the merge exits 2 naming the file: `[ask-agent] config: PATH: KEY: MESSAGE`. `tests/fixtures/policy.example.json` is a neutral example.
+
+The bash router and `bin/route-hint`'s rules do not read the private file, so `agents.json` keeps the full site policy until the switch to the TypeScript router (phase 8).
+
 ### Run history
 
 Every agent run, successful or not, appends one JSON line to `~/.cache/multi-agent-router/runs.jsonl` (`$XDG_CACHE_HOME` honored): `ts`, `agent`, `tier`, `role` (TypeScript router only), `model`, `cwd`, `exit`, `seconds`, `prompt` (task without the preamble, first 2000 chars), `prompt_chars`, `answer` (first 2000 chars) and `changed_files`.

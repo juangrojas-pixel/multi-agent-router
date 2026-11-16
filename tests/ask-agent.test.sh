@@ -7,8 +7,12 @@ ASK="${ASK_AGENT_BIN:-$ROOT/bin/ask-agent}"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 export XDG_CACHE_HOME="$SCRATCH/cache"
+# Generic checks never read the user's private policy file; site checks name it explicitly.
+export XDG_CONFIG_HOME="$SCRATCH/xdg"
+unset ASK_AGENT_POLICY
+POLICY="$HOME/.config/multi-agent-router/policy.json"
 
-pass=0 fail=0
+pass=0 fail=0 skipped=0
 check() { # name, condition result (0 ok)
   if [[ "$2" == 0 ]]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: $1"; fi
 }
@@ -38,11 +42,21 @@ for a in gentle-shell opencode; do
   [[ "$out" == *"PING"* ]]; check "$a still receives the task" $?
 done
 
-# Only gentle-shell may work on client servers, and it stops on a guard confirmation.
-out="$(ask gentle-shell)"
-[[ "$out" == *"client servers"* && "$out" == *"CONFIRMACION REQUERIDA"* ]]; check "gentle-shell may reach clients and reports confirmations" $?
-out="$(ask agy)"
-[[ "$out" == *"you are read-only"* ]]; check "agy is read-only on client servers" $?
+# Site checks: only gentle-shell may work on client servers, and it stops on a guard confirmation;
+# agy is read-only there. That text lives in the private policy file, which only the TypeScript
+# router reads; the bash router runs with the generic preambles of agents.json.
+if [[ "$(basename "$(readlink -f "$ASK")")" != ask-agent-ts ]]; then
+  skipped=$((skipped + 2))
+  echo "SKIP: 2 site checks (this router does not read the private policy file)"
+elif [[ ! -f "$POLICY" ]]; then
+  skipped=$((skipped + 2))
+  echo "SKIP: 2 site checks (no private policy at $POLICY)"
+else
+  out="$(ASK_AGENT_POLICY="$POLICY" "$ASK" -a gentle-shell "PING" 2>/dev/null)"
+  [[ "$out" == *"client servers"* && "$out" == *"CONFIRMACION REQUERIDA"* ]]; check "gentle-shell may reach clients and reports confirmations" $?
+  out="$(ASK_AGENT_POLICY="$POLICY" "$ASK" -a agy "PING" 2>/dev/null)"
+  [[ "$out" == *"you are read-only"* && "$out" == *"client servers"* ]]; check "agy is read-only on client servers" $?
+fi
 out="$(ask opencode)"
 [[ "$out" == *"do not push, publish, delete data, or connect to remote servers"* ]]; check "opencode stays off remote servers" $?
 
@@ -183,5 +197,5 @@ out="$(XDG_CACHE_HOME="$SCRATCH/cache-runs" "$ASK" runs 2>&1)"
 # Unknown backend is rejected.
 "$ASK" --backend nope -a codex "PING" >/dev/null 2>&1; [[ $? == 2 ]]; check "unknown backend is rejected" $?
 
-echo "ask-agent: $pass passed, $fail failed"
+echo "ask-agent: $pass passed, $fail failed, $skipped skipped"
 ((fail == 0))

@@ -7,9 +7,13 @@ HINT="$ROOT/bin/route-hint"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 export XDG_CACHE_HOME="$SCRATCH/cache"
+# Generic checks never read the user's private policy file; site checks name it explicitly.
+export XDG_CONFIG_HOME="$SCRATCH/xdg"
+unset ASK_AGENT_POLICY
+POLICY="$HOME/.config/multi-agent-router/policy.json"
 LOG="$XDG_CACHE_HOME/multi-agent-router/route.jsonl"
 
-pass=0 fail=0
+pass=0 fail=0 skipped=0
 check() { # name, condition result (0 ok)
   if [[ "$2" == 0 ]]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: $1"; fi
 }
@@ -40,22 +44,6 @@ out="$(context "arma el .md siguiendo la plantilla del informe")"
 
 out="$(context "apoyate en los demas agentes para el informe de croydon")"
 [[ "$out" == *'ask-agent -a gentle-shell'* ]]; check "explicit delegation routes to gentle-shell" $?
-[[ "$(last_rule)" == explicit-delegate ]]; check "explicit delegation beats client names" $?
-
-out="$(context "pasalo a PDF y subelo a drive")"
-[[ "$out" == *'ask-agent -a agy'* ]]; check "pdf/drive routes to agy" $?
-[[ "$(last_rule)" == report-doc ]]; check "pdf/drive logs report-doc" $?
-
-out="$(context "puedes responder este correo que me piden estatus")"
-[[ "$out" == *'ask-agent -a agy'* ]]; check "email reply routes to agy" $?
-[[ "$(last_rule)" == client-text ]]; check "email reply logs client-text" $?
-
-out="$(context "como se calculan los contenedores en jde")"
-[[ "$out" == *'ask-agent -a gentle-shell'* && "$out" == *'handoff/actual'* ]]; check "client question routes to gentle-shell with handoff" $?
-[[ "$(last_rule)" == client-work ]]; check "client question logs client-work" $?
-
-out="$(context "revisa la arquitectura del servidor de richmond por ssh")"
-[[ "$out" == *'ask-agent -a gentle-shell'* ]]; check "client server review routes to gentle-shell" $?
 
 out="$(context "cual es la mejor ruta para hacerlo")"
 [[ "$out" == *'ask-agent -a gentle-shell'* ]]; check "planning question routes to gentle-shell" $?
@@ -73,9 +61,40 @@ out="$(context "sin delegar: que conviene en esta arquitectura")"
 [[ "$out" != *'ask-agent -a'* ]]; check "sin delegar stays inline" $?
 
 # Unmatched prompts get the short general policy, not a directive.
+NOTES="$(jq -r '.routing.notes' "$ROOT/agents.json")"
 out="$(context "hola, como va")"
-[[ "$out" == *'AUTO-ROUTING'* && "$out" != *'ROUTE NOW'* ]]; check "unmatched gets general policy" $?
+[[ "$out" == *"$NOTES"* && "$out" != *'ROUTE NOW'* ]]; check "unmatched gets general policy" $?
 [[ "$(last_rule)" == none ]]; check "unmatched logs none" $?
+
+# Site checks: the site rules, directive and policy text live in the private policy file, which
+# bin/route-hint reads through `ask-agent-ts config`. They run against the real file when it exists.
+scontext() { jq -n --arg p "$1" '{prompt: $p}' | ASK_AGENT_POLICY="$POLICY" "$HINT" | jq -r '.hookSpecificOutput.additionalContext // ""'; }
+if [[ -f "$POLICY" ]]; then
+  out="$(scontext "apoyate en los demas agentes para el informe de croydon")"
+  [[ "$out" == *'ask-agent -a gentle-shell'* && "$(last_rule)" == explicit-delegate ]]; check "explicit delegation beats client names" $?
+
+  out="$(scontext "pasalo a PDF y subelo a drive")"
+  [[ "$out" == *'ask-agent -a agy'* ]]; check "pdf/drive routes to agy" $?
+  [[ "$(last_rule)" == report-doc ]]; check "pdf/drive logs report-doc" $?
+
+  out="$(scontext "puedes responder este correo que me piden estatus")"
+  [[ "$out" == *'ask-agent -a agy'* ]]; check "email reply routes to agy" $?
+  [[ "$(last_rule)" == client-text ]]; check "email reply logs client-text" $?
+
+  out="$(scontext "como se calculan los contenedores en jde")"
+  [[ "$out" == *'ask-agent -a gentle-shell'* && "$out" == *'handoff/actual'* ]]; check "client question routes to gentle-shell with handoff" $?
+  [[ "$(last_rule)" == client-work ]]; check "client question logs client-work" $?
+
+  out="$(scontext "revisa la arquitectura del servidor de richmond por ssh")"
+  [[ "$out" == *'ask-agent -a gentle-shell'* && "$(last_rule)" == client-work ]]; check "client server review routes to gentle-shell" $?
+
+  out="$(scontext "hola, como va")"
+  [[ "$out" == *'AUTO-ROUTING'* && "$out" != *'ROUTE NOW'* ]]; check "unmatched gets general policy (site)" $?
+  [[ "$out" == *'ask-agent -r coder -C <dir>'* && "$out" == *'AUTO-ROUTING'* ]]; check "unmatched gets role guidance and notes (site)" $?
+else
+  skipped=$((skipped + 10))
+  echo "SKIP: 10 site checks (no private policy at $POLICY)"
+fi
 
 # Slash commands are left alone and not logged.
 before="$(wc -l <"$LOG")"
@@ -114,7 +133,7 @@ rm -f "$XDG_CACHE_HOME/multi-agent-router/cooldown.json"
 
 # Unmatched prompts get the generated role guidance followed by the routing notes.
 out="$(context "hola, como va")"
-[[ "$out" == *'ask-agent -r coder -C <dir>'* && "$out" == *'AUTO-ROUTING'* ]]; check "unmatched gets role guidance and notes" $?
+[[ "$out" == *'ask-agent -r coder -C <dir>'* && "$out" == *"$NOTES"* ]]; check "unmatched gets role guidance and notes" $?
 
 # A rule naming a role routes through ask-agent -r; an agent rule keeps its directive.
 ROLECFG="$SCRATCH/role.json"
@@ -148,8 +167,27 @@ jq 'del(.roles) | del(.routing.notes) | .routing.general = "GENERAL-FALLBACK"' "
 out="$(jq -n '{prompt: "hola, como va"}' | ASK_AGENT_CONFIG="$EMPTYCFG" "$HINT" | jq -r '.hookSpecificOutput.additionalContext')"
 [[ "$out" == 'GENERAL-FALLBACK' ]]; check "empty guidance falls back to general" $?
 
+# Rules, directive, role cooldowns and the general fall back come from the merged config
+# (`ask-agent-ts config`): agents.json with the private policy over it.
+PRIV="$SCRATCH/private.json"
+echo '{"routing": {"directive": "POLICY-DIRECTIVE {rule} {call}", "rules": [{"id": "policy-rule", "agent": "codex", "match": "zzpolicycheck"}]}}' >"$PRIV"
+out="$(jq -n '{prompt: "zzpolicycheck now"}' | ASK_AGENT_POLICY="$PRIV" "$HINT" | jq -r '.hookSpecificOutput.additionalContext')"
+[[ "$out" == 'POLICY-DIRECTIVE policy-rule ask-agent -a codex' ]]; check "private rules and directive are used" $?
+[[ "$(last_rule)" == policy-rule ]]; check "private rule is logged" $?
+echo '{"routing": {"general": "POLICY-GENERAL"}}' >"$PRIV"
+out="$(jq -n '{prompt: "hola, como va"}' | ASK_AGENT_CONFIG="$EMPTYCFG" ASK_AGENT_POLICY="$PRIV" "$HINT" | jq -r '.hookSpecificOutput.additionalContext')"
+[[ "$out" == 'POLICY-GENERAL' ]]; check "empty guidance falls back to the merged general" $?
+echo '{"roles": {"coder": {"agents": ["agy"]}}}' >"$PRIV"
+echo "{\"agy\": $(($(date +%s) + 600))}" >"$XDG_CACHE_HOME/multi-agent-router/cooldown.json"
+out="$(jq -n '{prompt: "zzrolecheck please"}' | ASK_AGENT_CONFIG="$ROLECFG" ASK_AGENT_POLICY="$PRIV" "$HINT" | jq -r '.hookSpecificOutput.additionalContext')"
+[[ "$out" == 'SKIP DELEGATION'*'role coder'* ]]; check "role cooldown uses the merged role agents" $?
+rm -f "$XDG_CACHE_HOME/multi-agent-router/cooldown.json"
+# When the config command fails, the rules are read from the config file itself.
+out="$(jq -n '{prompt: "que conviene mas para esta arquitectura"}' | ASK_AGENT_CONFIG="$BADCFG" "$HINT" | jq -r '.hookSpecificOutput.additionalContext')"
+[[ "$out" == *'ROUTE NOW'*'ask-agent -a gentle-shell'* ]]; check "failing config command falls back to the file for rules" $?
+
 # --stats summarizes the log per rule.
 "$HINT" --stats | rg -q 'design'; check "stats lists rules" $?
 
-echo "route-hint: $pass passed, $fail failed"
+echo "route-hint: $pass passed, $fail failed, $skipped skipped"
 [[ "$fail" == 0 ]]

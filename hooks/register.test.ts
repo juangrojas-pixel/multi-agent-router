@@ -12,7 +12,7 @@ const composeInput = {
 const GUIDANCE = '- coder: Writes code. Call: `ask-agent -r coder -C <dir> "<task>"`'
 
 // Stands in for the host commands the module runs: the guidance, the general policy and status.
-function host(on: any, answers: { guidance: { exitCode: number; stdout: string }; general?: string }) {
+function host(on: any, answers: { guidance: { exitCode: number; stdout: string }; general?: string; config?: string }) {
   const calls: string[][] = []
   on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
   on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'engine intro', scope: 'shared' as const }] }))
@@ -20,6 +20,9 @@ function host(on: any, answers: { guidance: { exitCode: number; stdout: string }
     calls.push([...e.argv])
     const argv = e.argv.join(' ')
     if (argv.endsWith('/bin/ask-agent-ts guidance')) return { value: { ...answers.guidance, stderr: '' } }
+    if (argv.endsWith('/bin/ask-agent-ts config') && answers.config !== undefined) {
+      return { value: { exitCode: 0, stdout: answers.config, stderr: '' } }
+    }
     if (argv.startsWith('jq ')) return { value: { exitCode: 0, stdout: `${answers.general ?? ''}\n`, stderr: '' } }
     return { value: { exitCode: 1, stdout: '', stderr: '' } }
   })
@@ -54,6 +57,19 @@ test('falls back to routing.general when the guidance is empty', async ($, on) =
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { sections } = await $.prompt.compose(composeInput)
   expect(sections[sections.length - 1].text).toContain('GENERAL')
+})
+
+test('the fall back reads routing.general from the merged config before agents.json', async ($, on) => {
+  host(on, {
+    guidance: { exitCode: 2, stdout: '' },
+    general: 'GENERAL',
+    config: `${JSON.stringify({ routing: { general: 'MERGED-GENERAL' } }, null, 2)}\n`,
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const { sections } = await $.prompt.compose(composeInput)
+  const text = sections[sections.length - 1].text
+  expect(text).toContain('MERGED-GENERAL')
+  expect(text).not.toContain('\n\nGENERAL\n')
 })
 
 test('the frame names no agent of its own', async ($, on) => {

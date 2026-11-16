@@ -45,6 +45,12 @@ if (original[0] === "guidance") {
   process.stdout.write(guidance(config));
   process.exit(0);
 }
+// The merged config (agents.json with the private policy over it), for readers outside the
+// router such as bin/route-hint and the adapters.
+if (original[0] === "config") {
+  process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
+  process.exit(0);
+}
 if (process.env.ASK_AGENT_DEPTH) fail(NESTED);
 
 // Readiness of every agent, its tiers, then agy's quota buckets. Exits as the bash router's
@@ -143,6 +149,7 @@ for (let index = 0; index < args.length; index += 1) {
       "  ask-agent -r ROLE [-C DIR] [PROMPT]                           run as a role from agents.json",
       "  ask-agent roles                                               role entries: agent, model, effort, ready",
       "  ask-agent guidance                                            routing guidance for the orchestrator",
+      "  ask-agent config                                              merged config (agents.json + private policy) as JSON",
       "  ask-agent parallel [-t TIER | -a A,B] [-C DIR] [PROMPT]       every ready agent answers",
       "  ask-agent status                                              readiness, tiers, agy quota",
       "  ask-agent reset [AGENT]                                       clear cooldowns",

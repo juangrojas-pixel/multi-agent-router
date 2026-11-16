@@ -34,8 +34,10 @@ export const register: Register = on => {
     // Shown at once so the person sees the hook ran while the slow check is pending.
     $.ui.status('agents: checking…')
     // The guidance is called by path under the plugin root, never through `ask-agent` on PATH;
-    // `routing.general` is its fall back when it fails or is empty. Both run at once and are
-    // awaited, so the first prompt carries the policy and session start waits 5 s at most.
+    // `routing.general` is its fall back when it fails or is empty, read from the merged config
+    // (`ask-agent-ts config`, which includes the private policy file) and only then from
+    // agents.json. All three run at once and are awaited, so the first prompt carries the
+    // policy and session start waits 5 s at most.
     const read = async (argv: string[], what: string): Promise<string> => {
       try {
         const { exitCode, stdout } = await $.process.run(argv, { timeoutMs: 5_000 })
@@ -45,11 +47,17 @@ export const register: Register = on => {
         return ''
       }
     }
-    const [guidance, general] = await Promise.all([
+    const [guidance, merged, general] = await Promise.all([
       read([`${$.plugin.root}/bin/ask-agent-ts`, 'guidance'], 'guidance'),
+      read([`${$.plugin.root}/bin/ask-agent-ts`, 'config'], 'config read'),
       read(['jq', '-r', '.routing.general // empty', `${$.plugin.root}/agents.json`], 'policy read'),
     ])
-    policy = guidance || general
+    let mergedGeneral = ''
+    try {
+      const value = JSON.parse(merged || 'null')?.routing?.general
+      if (typeof value === 'string') mergedGeneral = value.trim()
+    } catch {}
+    policy = guidance || mergedGeneral || general
     void (async () => {
       try {
         const { exitCode, stdout } = await $.process.run([`${$.plugin.root}/bin/ask-agent`, 'status'], {

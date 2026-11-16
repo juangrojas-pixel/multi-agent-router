@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# route-hint: UserPromptSubmit hook that turns the routing policy in agents.json
-# into a per-prompt directive, and logs each decision (never the prompt text).
+# route-hint: UserPromptSubmit hook that turns the routing policy into a per-prompt directive,
+# and logs each decision (never the prompt text). The policy is the merged config printed by
+# `ask-agent-ts config` (agents.json with the private policy file over it); when that call fails
+# or prints nothing, agents.json itself is read.
 #
 # Usage:
 #   route-hint            read the hook JSON on stdin, print hook JSON on stdout
@@ -25,8 +27,13 @@ prompt="$(jq -r '.prompt // ""')"
 # Background-task events arrive as prompts too; they are not user requests.
 [[ "$prompt" == *"<task-notification>"* || "$prompt" == *"[SYSTEM NOTIFICATION"* ]] && exit 0
 
-# First matching rule wins; inline rules come first in agents.json. A rule names an agent
-# (`ask-agent -a`) or a role (`ask-agent -r`).
+# The merged config, read once per prompt; called by path next to this script.
+cfg="$(ASK_AGENT_CONFIG="$CONFIG" "$ROOT/bin/ask-agent-ts" config 2>/dev/null)" || cfg=""
+# A regex test, not ${cfg//[[:space:]]/}: that substitution takes about 300 ms on the config.
+[[ "$cfg" =~ [^[:space:]] ]] || cfg="$(<"$CONFIG")"
+
+# First matching rule wins; inline rules come first. A rule names an agent (`ask-agent -a`)
+# or a role (`ask-agent -r`).
 decision="$(jq -c --arg p "$prompt" '
   .routing as $r
   | ([$r.rules[] | select(.match as $m | $p | test($m; "i"))] | first) as $hit
@@ -37,13 +44,13 @@ decision="$(jq -c --arg p "$prompt" '
       | {rule: $hit.id, agent: $hit.agent, role: $hit.role,
          text: ($r.directive | gsub("\\{rule\\}"; $hit.id) | gsub("\\{call\\}"; $call) | gsub("\\{agent\\}"; $who)
                 | gsub("\\{verify\\}"; $hit.verify // ""))}
-    end' "$CONFIG")"
+    end' <<<"$cfg")"
 
 # Unmatched prompts get the router's guidance (generated from the roles), called by path next
 # to this script; when it fails or prints nothing, the general policy is the fall back.
 if [[ "$(jq -r '.rule' <<<"$decision")" == none ]]; then
   guidance="$(ASK_AGENT_CONFIG="$CONFIG" "$ROOT/bin/ask-agent-ts" guidance 2>/dev/null)" || guidance=""
-  [[ -n "${guidance//[[:space:]]/}" ]] || guidance="$(jq -r '.routing.general // empty' "$CONFIG")"
+  [[ -n "${guidance//[[:space:]]/}" ]] || guidance="$(jq -r '.routing.general // empty' <<<"$cfg")"
   decision="$(jq -c --arg t "$guidance" '.text = $t' <<<"$decision")"
 fi
 
@@ -60,7 +67,7 @@ elif [[ -n "$role" && -s "$STATE_DIR/cooldown.json" ]]; then
   # first of them does, so the earliest end is the one reported.
   until="$(jq -r --arg r "$role" --slurpfile c "$STATE_DIR/cooldown.json" '
     [.roles[$r].agents[]? | if type == "string" then . else .agent end | ($c[0][.] // 0)]
-    | if length == 0 then 0 else min end' "$CONFIG" 2>/dev/null || echo 0)"
+    | if length == 0 then 0 else min end' <<<"$cfg" 2>/dev/null || echo 0)"
 fi
 if ((until > now)); then
   if [[ -n "$role" ]]; then

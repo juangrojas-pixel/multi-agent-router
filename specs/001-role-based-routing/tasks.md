@@ -103,7 +103,7 @@ before its implementation. Tests go through the CLI and use stub agents from
 - [x] T036 Update `skills/delegate/SKILL.md` and `agents/*.md` to call by role where a role exists
 - [x] T037 Quickstart section 4 on the user's machine, then move `~/.local/bin/ask-agent` to `bin/ask-agent-ts` only on the user's explicit go-ahead; `bin/ask-agent` stays in the repository
 - [x] T038 Create the user's real `policy.json` outside the repository with the client-specific `prompt_preamble` texts and routing prose copied verbatim from `agents.json`, and confirm with `ask-agent-ts` and a `stub-argv` copy of the config that each agent receives the same preamble as before
-- [ ] T039 [US5] Only after T037 and T038: replace the client-specific text in `agents.json` with generic versions. From this point the bash fallback runs with generic preambles; state that in `README.md`
+- [x] T039 [US5] Only after T037 and T038: replace the client-specific text in `agents.json` with generic versions. From this point the bash fallback runs with generic preambles; state that in `README.md`
 
 ## Dependencies
 

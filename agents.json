@@ -57,7 +57,7 @@
         "group": "Gemini Models",
         "min_remaining": 0.1
       },
-      "prompt_preamble": "You are an executor called by another agent. Do the task end to end inside the current working directory: create and edit files and run the commands it needs. On client servers, OCI and databases you are read-only: only list, get, read logs and SELECT; the VCE guards deny anything else. When a guard denies a call, stop the task and reply with the guard message and the exact blocked command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result."
+      "prompt_preamble": "You are an executor called by another agent. Do the task end to end inside the current working directory: create and edit files and run the commands it needs. On remote servers, cloud accounts and databases you are read-only: only list, get, read logs and SELECT. When a guard or permission check denies a call, stop the task and reply with the denial message and the exact blocked command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result."
     },
     "opencode": {
       "enabled": true,
@@ -78,7 +78,7 @@
       "model": null,
       "timeout_seconds": 1800,
       "extra_args": [],
-      "prompt_preamble": "You are an executor called by another agent. Do the task end to end: create and edit files and run the commands it needs, including client servers, OCI CLI and databases when the task asks for it. The VCE guards run on every tool call. When a guard blocks a command with CONFIRMACION REQUERIDA, stop the task and reply with the guard message and the exact blocked command; never add HOOK_CONFIRMADO=1 unless this task says the user confirmed that exact command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result."
+      "prompt_preamble": "You are an executor called by another agent. Do the task end to end: create and edit files and run the commands it needs, including remote servers, cloud CLIs and databases when the task asks for it. When a guard or permission check blocks a command, stop the task and reply with the denial message and the exact blocked command; never bypass the check unless this task says the user confirmed that exact command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result."
     },
     "claude": {
       "enabled": false,
@@ -100,9 +100,9 @@
     }
   },
   "routing": {
-    "general": "AUTO-ROUTING (multi-agent-router). Goal: save Claude tokens. Delegate the whole task, writing included, and call by agent (`ask-agent -a <agent> -C <dir>`), never by tier. agy and opencode: easy, well-specified work (templates, docs, summaries, mechanical edits). gentle-shell: work that needs real thinking (architecture, design, root cause, review, complex documents). codex: read-only second opinion. Executors write files in -C DIR and return a receipt. Trust the receipt: check one thing (the file exists, or one command) and never reread, redo or rewrite their work. Client servers/OCI/DBs: you or gentle-shell (the VCE guards run on both); agy only read-only (reports: gather evidence and write them, guarded and read-only by hook); never opencode or codex. When gentle-shell reports CONFIRMACION REQUERIDA, relay it to the user (what, which client and compartment) and stop; only on an explicit yes, re-run gentle-shell saying the user confirmed that exact command, so it retries with HOOK_CONFIRMADO=1. Secrets and trivial lookups stay inline. On quota or error, do it yourself and say so in one line. Mention which agent answered.",
-    "notes": "AUTO-ROUTING (multi-agent-router). Goal: save Claude tokens. Delegate the whole task, writing included, and call by agent (`ask-agent -a <agent> -C <dir>`), never by tier. agy and opencode: easy, well-specified work (templates, docs, summaries, mechanical edits). gentle-shell: work that needs real thinking (architecture, design, root cause, review, complex documents). codex: read-only second opinion. Executors write files in -C DIR and return a receipt. Trust the receipt: check one thing (the file exists, or one command) and never reread, redo or rewrite their work. Client servers/OCI/DBs: you or gentle-shell (the VCE guards run on both); agy only read-only (reports: gather evidence and write them, guarded and read-only by hook); never opencode or codex. When gentle-shell reports CONFIRMACION REQUERIDA, relay it to the user (what, which client and compartment) and stop; only on an explicit yes, re-run gentle-shell saying the user confirmed that exact command, so it retries with HOOK_CONFIRMADO=1. Secrets and trivial lookups stay inline. On quota or error, do it yourself and say so in one line. Mention which agent answered.",
-    "directive": "ROUTE NOW (multi-agent-router, user-authorized standing rule): this prompt matches `{rule}`. Before doing it yourself, run `{call} -C <dir> \"<self-contained task with the needed context and file paths>\"`. {verify} If the task turns out to touch client servers/OCI/DBs, hand it to gentle-shell (agy only for read-only report work) or do it yourself; secrets stay inline; if the agent fails, do it yourself (say so in one line). Mention which agent answered.",
+    "general": "Routing policy (multi-agent-router). Delegate whole, self-contained tasks to external agents through the router, writing included: `ask-agent -r <role> -C <dir> \"<task>\"`, or `ask-agent -a <agent> -C <dir> \"<task>\"` for a named agent; never by tier. Executors write files in -C DIR and return a receipt: check one thing (the file exists, or one command) and do not redo their work. Secrets, credentials, destructive or production-affecting actions and trivial lookups stay inline. On quota or error, do the task yourself and say so in one line. Mention which agent answered.",
+    "notes": "Delegate whole, self-contained tasks, writing included. Executors write files in -C DIR and return a receipt: check one thing (the file exists, or one command) and do not redo their work. Secrets, credentials, destructive or production-affecting actions and trivial lookups stay inline. On quota or error, do the task yourself and say so in one line. Mention which agent answered.",
+    "directive": "ROUTE NOW (multi-agent-router): this prompt matches `{rule}`. Before doing it yourself, run `{call} -C <dir> \"<self-contained task with the needed context and file paths>\"`. {verify} Secrets and destructive or production-affecting actions stay inline; if {agent} fails, do it yourself (say so in one line). Mention which agent answered.",
     "rules": [
       {
         "id": "inline-explicit",
@@ -113,30 +113,12 @@
         "id": "explicit-delegate",
         "agent": "gentle-shell",
         "match": "ap[oó]yate|dem[aá]s agentes|otros agentes|(utiliza|usa|llama|con|ll[eé]va(lo|la|las|los)? a|que lo (haga|corrija)) (tambi[eé]n )?(a )?(agy|gentle-?shell|opencode|codex)\\b|trabajando solo|delega",
-        "verify": "The user asked for delegation explicitly: if the prompt names agy, opencode or codex, call that agent instead. For client work, save the handoff first (mem_save, project=<client>, topic_key=handoff/actual: task, files, tables, last error, decisions) and tell the agent to read it with mem_search(query=\"handoff/actual\", project=\"<client>\")."
+        "verify": "The user asked for delegation explicitly: if the prompt names agy, opencode or codex, call that agent instead. Put the task, the files involved, the last error and the decisions taken so far in the prompt."
       },
       {
         "id": "inline-sensitive",
         "agent": null,
         "match": "password|contrase[nñ]a|secreto|credencial|\\btoken|api ?key|\\bpass\\b|reinici|restart|\\bapag|encend|enciende|\\bstop\\b|drop |truncate|abr[ei] (el|los) puertos?|firewall|0\\.0\\.0\\.0"
-      },
-      {
-        "id": "report-doc",
-        "agent": "agy",
-        "match": "\\bpdf\\b|drive|s[uú]belo|excel|minutograma|(haz|hace|arm|gener|cre|termin|actualiz|redact)\\w* .{0,40}(informe|reporte|documento)",
-        "verify": "Pass the skill or spec to follow and, for client reports, the handoff key (handoff/actual in the client's engram project). Check the output file exists; do not reread or rewrite it."
-      },
-      {
-        "id": "client-text",
-        "agent": "agy",
-        "match": "correo|e-?mail|responde|contest|qu[eé] (le |les )?dig|textualmente|for dummies|whatsapp|\\bwpp\\b",
-        "verify": "Give it the message to answer and the facts to state; review the draft once before showing it to the user."
-      },
-      {
-        "id": "client-work",
-        "agent": "gentle-shell",
-        "match": "richmond|raven|corpacero|coparcero|croydon|integral|pegatex|artecola|dapsa|elimarc|grodco|taurel|topdrilling|vcetest|sefarcol|sodimac|\\bjde\\b|\\bapex\\b|\\bords\\b|weblogic|\\bvpn\\b|\\brdp\\b|\\bhka\\b|\\bdian\\b|factura|servidor|\\bserver|\\bssh\\b|\\boci\\b|bastion|producci[oó]n|base de datos|\\bbd\\b|oracle|sqlcl",
-        "verify": "Save the handoff first (mem_save, project=<client>, topic_key=handoff/actual: task, files, tables, last error, decisions) and tell the agent to read it with mem_search(query=\"handoff/actual\", project=\"<client>\"). A one-line answer you already know stays inline. Spot-check 1 key fact of its answer."
       },
       {
         "id": "second-opinion",

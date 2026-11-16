@@ -53,3 +53,13 @@ test("the adapter falls back to routing.general when the guidance is empty", () 
   const result = run(s.env, ["task"]);
   assert.equal(result.stdout, "<-->\n<--append-system-prompt>\n<GENERAL>\n<task>\n");
 });
+
+test("the adapter's fall back reads routing.general from the merged config first", () => {
+  const s = setup({ agents: { agy: agent }, routing: { general: "GENERAL" } });
+  const policy = join(s.root, "config", "multi-agent-router", "policy.json");
+  mkdirSync(join(policy, ".."), { recursive: true });
+  writeFileSync(policy, JSON.stringify({ routing: { general: "PRIVATE GENERAL" } }));
+  const result = run(s.env, ["task"]);
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "<-->\n<--append-system-prompt>\n<PRIVATE GENERAL>\n<task>\n");
+});

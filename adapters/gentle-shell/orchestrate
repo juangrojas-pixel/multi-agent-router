@@ -8,6 +8,11 @@ ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 CONFIG="${ASK_AGENT_CONFIG:-$ROOT/agents.json}"
 
 guidance="$(ASK_AGENT_CONFIG="$CONFIG" "$ROOT/bin/ask-agent-ts" guidance 2>/dev/null)" || guidance=""
-[[ -n "${guidance//[[:space:]]/}" ]] || guidance="$(jq -r '.routing.general // empty' "$CONFIG")"
+# The fall back is routing.general from the merged config (agents.json plus the private policy
+# file), and from agents.json itself when that call fails.
+if [[ -z "${guidance//[[:space:]]/}" ]]; then
+  guidance="$(ASK_AGENT_CONFIG="$CONFIG" "$ROOT/bin/ask-agent-ts" config 2>/dev/null | jq -r '.routing.general // empty' 2>/dev/null)" || guidance=""
+  [[ -n "${guidance//[[:space:]]/}" ]] || guidance="$(jq -r '.routing.general // empty' "$CONFIG")"
+fi
 
 exec gentle-shell -- --append-system-prompt "$guidance" "$@"

@@ -78,3 +78,26 @@ test('the frame names no agent of its own', async ($, on) => {
   const { sections } = await $.prompt.compose(composeInput)
   expect(sections[sections.length - 1].text).not.toMatch(/gentle-shell|agy|opencode|codex/)
 })
+
+test('the status line leaves out agents disabled on purpose and marks real problems', async ($, on) => {
+  const status = [
+    'opencode      [draft]                  ready',
+    'agy           [execute]                skip: cooldown until 12:00',
+    'claude        [explicit only]          skip: disabled',
+  ].join('\n')
+  const shown: string[] = []
+  on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  on('process.run', (_: unknown, e: { argv: readonly string[] }) => {
+    if (e.argv.join(' ').endsWith('/bin/ask-agent status')) return { value: { exitCode: 0, stdout: `${status}\n`, stderr: '' } }
+    return { value: { exitCode: 1, stdout: '', stderr: '' } }
+  })
+  on('ui.status', (_: unknown, text: unknown) => {
+    shown.push(String(typeof text === 'string' ? text : (text as { text?: string })?.text ?? JSON.stringify(text)))
+    return { value: undefined }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let i = 0; i < 100 && !shown.some(s => s.includes('opencode')); i++) await new Promise(r => setTimeout(r, 10))
+  const last = shown[shown.length - 1]
+  expect(last).toContain('agents: opencode✓ agy✗')
+  expect(last).not.toContain('claude')
+})

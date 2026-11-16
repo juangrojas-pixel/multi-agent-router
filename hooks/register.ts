@@ -21,6 +21,8 @@ function statusLine(status: string): string {
   return status
     .split('\n')
     .filter(line => /\b(ready|skip:)/.test(line))
+    // An agent disabled in the config is a choice, not a problem: leave it out.
+    .filter(line => !/\bskip: disabled\b/.test(line))
     .map(line => `${line.trim().split(/\s+/)[0]}${/\bready\b/.test(line) ? '✓' : '✗'}`)
     .join(' ')
 }

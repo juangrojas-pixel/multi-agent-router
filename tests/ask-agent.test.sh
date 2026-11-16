@@ -79,6 +79,10 @@ if command -v hc >/dev/null; then
   cat >"$SCRATCH/hc-wrap" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$1" >>"$HCLOG"
+if [[ "\$1" == rm && -f "$SCRATCH/refuse-first-rm" && ! -f "$SCRATCH/refused-\$2" ]]; then
+  touch "$SCRATCH/refused-\$2"
+  exit 0
+fi
 exec "$(command -v hc)" "\$@"
 EOF
   chmod +x "$SCRATCH/hc-wrap"
@@ -118,8 +122,13 @@ echo "429 Too Many Requests" >&2; exit 1
 EOF
   chmod +x "$SCRATCH/quota-stub"
   jq --arg s "$SCRATCH/quota-stub" '.agents.opencode.command = $s' "$SCRATCH/agents-hc.json" >"$SCRATCH/t.json"
-  XDG_CACHE_HOME="$SCRATCH/cache-q" ASK_AGENT_CONFIG="$SCRATCH/t.json" "$ASK" --backend hc -a opencode "PING" >/dev/null 2>"$SCRATCH/err"
+  [[ "$(basename "$(readlink -f "$ASK")")" == ask-agent-ts ]] || touch "$SCRATCH/refuse-first-rm"
+  XDG_CACHE_HOME="$SCRATCH/cache-q" ASK_AGENT_CONFIG="$SCRATCH/t.json" "$ASK" --backend hc -a opencode "PING" >/dev/null 2>"$SCRATCH/err"; rc=$?
+  [[ $rc == 0 ]]; check "hc backend quota fallback succeeds" $?
   grep -q 'opencode hit a quota/rate limit' "$SCRATCH/err"; check "hc backend keeps the agent's stderr and exit code" $?
+  hc ls --all --json | jq -e '[.terminals[]? | select((.name // "") | startswith("aa-"))] | length == 0' >/dev/null
+  check "hc backend removes quota fallback terminals" $?
+  rm -f "$SCRATCH/refuse-first-rm"
 
   # The per-agent timeout still kills the agent under hc.
   cat >"$SCRATCH/slow-stub" <<'EOF'

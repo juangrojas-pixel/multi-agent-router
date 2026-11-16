@@ -168,6 +168,10 @@ EOF
   local rc
   rc="$(<"$d/rc")"
   "$hc" rm "$addr" >/dev/null 2>&1
+  if "$hc" get "$addr" --json >/dev/null 2>&1; then
+    "$hc" wait "$addr" --json --timeout 2 >/dev/null 2>&1
+    "$hc" rm "$addr" >/dev/null 2>&1
+  fi
   rm -rf "$d"
   return "$rc"
 }

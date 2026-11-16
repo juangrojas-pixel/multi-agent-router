@@ -107,6 +107,8 @@ export async function runAgent(
   prompt: string,
   requestedModel: string,
   tier: string,
+  effort = "",
+  role = "",
 ): Promise<{ ok: boolean; quota: boolean; stderr: string }> {
   const agent = config.agents[id];
   const model = requestedModel || agent.model || "";
@@ -116,7 +118,7 @@ export async function runAgent(
   const timeoutSeconds = agent.timeout_seconds ?? 600;
   const started = Date.now();
   const before = gitSnapshot();
-  const result = await runProcess(agent.command, commandArgs(id, agent, task, model), timeoutSeconds);
+  const result = await runProcess(agent.command, commandArgs(id, agent, task, model, effort), timeoutSeconds);
   const seconds = Math.floor((Date.now() - started) / 1000);
   const output = `${result.stdout}${result.stderr}`;
   const answer = parseOutput(built.output, result.stdout);
@@ -132,6 +134,7 @@ export async function runAgent(
     prompt,
     answer || output,
     changedFiles(before, gitSnapshot()),
+    role,
   );
   if (quota) setCooldown(id, Math.floor(Date.now() / 1000) + (config.cooldown_seconds ?? 3600));
 

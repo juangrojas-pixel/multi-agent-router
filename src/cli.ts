@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadConfig, type Config } from "./config.ts";
+import { resolveRole, type RoleEntry } from "./roles.ts";
 import { available, runAgent } from "./run.ts";
 
 const original = process.argv.slice(2);
@@ -22,6 +23,8 @@ let config: Config;
 try { config = loadConfig(); } catch (error) { fail(`config: ${(error as Error).message}`); }
 
 function selectedAgents(args: string[], value: Config): string[] {
+  const roleIndex = args.findIndex((arg) => arg === "-r" || arg === "--role");
+  if (roleIndex >= 0) return (value.roles?.[args[roleIndex + 1] ?? ""]?.agents ?? []).map((item) => (typeof item === "string" ? item : item.agent));
   const agentIndex = args.findIndex((arg) => arg === "-a" || arg === "--agent");
   if (agentIndex >= 0) return (args[agentIndex + 1] ?? "").split(",").filter(Boolean);
   const tierIndex = args.findIndex((arg) => arg === "-t" || arg === "--tier");
@@ -34,6 +37,7 @@ if (!explicitSubprocess && (config.backend === "hc" || selectedAgents(original, 
 
 let tier = "";
 let agents = "";
+let role = "";
 let model = "";
 let prompt = "";
 let dir = "";
@@ -52,6 +56,7 @@ for (let index = 0; index < original.length; index += 1) {
   }
   if (argument === "-t" || argument === "--tier") tier = optionValue(index++);
   else if (argument === "-a" || argument === "--agent") agents = optionValue(index++);
+  else if (argument === "-r" || argument === "--role") role = optionValue(index++);
   else if (argument === "-m" || argument === "--model") model = optionValue(index++);
   else if (argument === "-C" || argument === "--cwd") dir = optionValue(index++);
   else if (argument === "--backend") {
@@ -64,11 +69,14 @@ for (let index = 0; index < original.length; index += 1) {
       "",
       "Usage:",
       "  ask-agent [-t TIER | -a AGENT] [-m MODEL] [-C DIR] [PROMPT]   first ready agent answers",
+      "  ask-agent -r ROLE [-C DIR] [PROMPT]                           run as a role from agents.json",
       "  ask-agent parallel [-t TIER | -a A,B] [-C DIR] [PROMPT]       every ready agent answers",
       "  ask-agent status                                              readiness, tiers, agy quota",
       "  ask-agent reset [AGENT]                                       clear cooldowns",
       "  ask-agent runs [N] [-a AGENT]                                 run history (runs.jsonl)",
       "Tiers: think | execute | draft (see agents.json). Prompt is read from stdin if omitted.",
+      "-r/--role ROLE: run on the role's agents in order, with the role's model and effort;",
+      "  cannot be combined with -a, -t or -m.",
       "--backend hc|subprocess: run agents in live hc terminals or as plain subprocesses.",
       "",
     ].join("\n"));
@@ -80,7 +88,13 @@ for (let index = 0; index < original.length; index += 1) {
   }
 }
 
+if (role && (tier || agents)) fail("use only one of -r, -a, -t");
+if (role && model) fail("use -r without -m: the model comes from the role");
 if (tier && agents) fail("error: use either -t or -a, not both");
+let roleEntries: RoleEntry[] = [];
+if (role) {
+  try { roleEntries = resolveRole(config, role); } catch (error) { fail((error as Error).message); }
+}
 if (dir) {
   try { process.chdir(dir); } catch { fail(`error: cannot cd to ${dir}`); }
 }
@@ -91,7 +105,9 @@ if (!prompt) {
 if (!prompt.trim()) fail("error: empty prompt");
 
 let candidates: string[];
-if (agents) {
+if (role) {
+  candidates = roleEntries.map((entry) => entry.agent);
+} else if (agents) {
   const named = agents.split(",");
   for (const id of named) if (!config.agents[id]) fail(`error: unknown agent: ${id}`);
   candidates = [];
@@ -114,7 +130,10 @@ for (const id of candidates) {
     continue;
   }
   log(`using ${id}`);
-  const result = await runAgent(id, config, prompt, model, tier);
+  const entry = roleEntries.find((item) => item.agent === id);
+  const result = entry
+    ? await runAgent(id, config, prompt, entry.model, tier, entry.effort, role)
+    : await runAgent(id, config, prompt, model, tier);
   if (result.ok) process.exit(0);
   log(result.stderr);
 }

@@ -8,7 +8,10 @@ export type Agent = {
   output?: "text" | "agy-json" | "opencode-events";
   backend?: string;
 };
-export type Config = { cooldown_seconds?: number; default_tier?: string; tiers?: Record<string, string[]>; agents: Record<string, Agent>; prompt_preamble?: string; backend?: string };
+// A role entry is an agent id, or an agent id with its own model and effort.
+export type RoleAgent = string | { agent: string; model?: string; effort?: string };
+export type Role = { description: string; agents: RoleAgent[]; model?: string; effort?: string };
+export type Config = { cooldown_seconds?: number; default_tier?: string; tiers?: Record<string, string[]>; agents: Record<string, Agent>; roles?: Record<string, Role>; prompt_preamble?: string; backend?: string };
 
 export function configPath(): string { return process.env.ASK_AGENT_CONFIG || resolve(import.meta.dirname, "../agents.json"); }
 export function loadConfig(): Config {

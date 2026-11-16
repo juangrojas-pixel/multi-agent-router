@@ -94,12 +94,14 @@ export function record(
   prompt: string,
   answer: string,
   files: string[],
+  role = "",
 ): void {
   ensure();
   const row = {
     ts,
     agent,
     tier,
+    role,
     model,
     cwd: process.cwd(),
     exit,

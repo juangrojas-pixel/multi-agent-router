@@ -29,11 +29,25 @@ ask-agent parallel -t think "question"   # every ready agent, one section each
 ask-agent reset [agent]                  # clear cooldowns
 ask-agent --backend hc -a codex "question"   # run the agent in a live hc terminal
 ask-agent runs [N] [-a agent]            # run history, last N (default 20)
+bin/ask-agent-ts -r coder "task"         # run as a role (TypeScript router only)
 ```
+
+### Roles
+
+`roles` in `agents.json` names who does what. Each role has a `description`, an ordered `agents` list and optional `model` and `effort` defaults. An entry is an agent id or `{ "agent", "model", "effort" }`; the entry's own value wins over the role default, which wins over the agent's `model`. The effort reaches the agent through its `effort_args` (for example `["--thinking", "{effort}"]`); an agent without `effort_args` ignores it.
+
+```json
+"roles": {
+  "coder": { "description": "Writes and edits code from a clear task.", "agents": ["gentle-shell", "agy"] },
+  "docs": { "description": "Drafts low-stakes text.", "agents": ["opencode", { "agent": "agy", "model": "gemini-3-flash" }] }
+}
+```
+
+`-r ROLE` (or `--role ROLE`) runs the task on the role's agents in order. It cannot be combined with `-a`, `-t` or `-m` (exit 2). An unknown role exits 2 with `unknown role: NAME (configured: ...)`; a config without roles exits 2 with `no roles configured`. Role runs record `role` in `runs.jsonl` (empty for `-a` and `-t` runs).
 
 ### Run history
 
-Every agent run, successful or not, appends one JSON line to `~/.cache/multi-agent-router/runs.jsonl` (`$XDG_CACHE_HOME` honored): `ts`, `agent`, `tier`, `model`, `cwd`, `exit`, `seconds`, `prompt` (task without the preamble, first 2000 chars), `prompt_chars`, `answer` (first 2000 chars) and `changed_files`.
+Every agent run, successful or not, appends one JSON line to `~/.cache/multi-agent-router/runs.jsonl` (`$XDG_CACHE_HOME` honored): `ts`, `agent`, `tier`, `role` (TypeScript router only), `model`, `cwd`, `exit`, `seconds`, `prompt` (task without the preamble, first 2000 chars), `prompt_chars`, `answer` (first 2000 chars) and `changed_files`.
 
 `changed_files` lists the paths of the run's git repo that changed during the run: new or different `git status` entries plus files in commits made during the run. It is empty outside a git repo. A file that was already modified before the run and is modified again does not show up. `last/<agent>.json` still keeps the latest run of each agent.
 

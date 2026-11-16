@@ -34,11 +34,11 @@ before its implementation. Tests go through the CLI and use stub agents from
 
 **Independent test**: one role pointing at `stub-argv`; run by role; the stub got the task.
 
-- [ ] T011 [US1] Write failing tests in `tests/role-run.test.ts` for spec Story 1 scenarios 1 to 5: run by role reaches the agent; role `model` and `effort` appear in the stub's arguments through `model_args` and `effort_args`; a role with only an agent adds neither; unknown role exits 2 with `unknown role: NAME (configured: ...)` and starts no agent; `-a` and `-t` calls are unchanged; `-r` with `-a`, `-t` or `-m` exits 2; no roles configured exits 2 with `no roles configured`
-- [ ] T012 [US1] Add `roles` to the config type in `src/config.ts`: each role has `description`, `agents` (at least one; each entry an agent id string or `{ "agent", "model"?, "effort"? }`), optional `model`, optional `effort`
-- [ ] T013 [US1] Implement role resolution in `src/roles.ts`: entries in order with duplicates dropped; the entry's own model and effort win over the role default, which wins over the agent's `model`
-- [ ] T014 [US1] Add `-r` / `--role` to `src/cli.ts` with the messages and exit status in `contracts/cli.md` "Run by role", and record `role` in each `runs.jsonl` line written by `src/state.ts`
-- [ ] T015 [US1] Document `-r` in the `--help` text of `src/cli.ts` and in `README.md`, and add two example roles to `agents.json`
+- [x] T011 [US1] Write failing tests in `tests/role-run.test.ts` for spec Story 1 scenarios 1 to 5: run by role reaches the agent; role `model` and `effort` appear in the stub's arguments through `model_args` and `effort_args`; a role with only an agent adds neither; unknown role exits 2 with `unknown role: NAME (configured: ...)` and starts no agent; `-a` and `-t` calls are unchanged; `-r` with `-a`, `-t` or `-m` exits 2; no roles configured exits 2 with `no roles configured`
+- [x] T012 [US1] Add `roles` to the config type in `src/config.ts`: each role has `description`, `agents` (at least one; each entry an agent id string or `{ "agent", "model"?, "effort"? }`), optional `model`, optional `effort`
+- [x] T013 [US1] Implement role resolution in `src/roles.ts`: entries in order with duplicates dropped; the entry's own model and effort win over the role default, which wins over the agent's `model`
+- [x] T014 [US1] Add `-r` / `--role` to `src/cli.ts` with the messages and exit status in `contracts/cli.md` "Run by role", and record `role` in each `runs.jsonl` line written by `src/state.ts`
+- [x] T015 [US1] Document `-r` in the `--help` text of `src/cli.ts` and in `README.md`, and add two example roles to `agents.json`
 
 **Checkpoint**: roles are usable by hand.
 

@@ -15,6 +15,22 @@
       "agy"
     ]
   },
+  "roles": {
+    "coder": {
+      "description": "Writes and edits code from a clear task.",
+      "agents": [
+        "gentle-shell",
+        "agy"
+      ]
+    },
+    "docs": {
+      "description": "Drafts low-stakes text: docs, summaries, changelogs.",
+      "agents": [
+        "opencode",
+        "agy"
+      ]
+    }
+  },
   "agents": {
     "codex": {
       "enabled": true,

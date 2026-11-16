@@ -28,8 +28,11 @@ export function cooldown(agent: string): number {
 
 // Runs `change` while holding the cooldown lock, the `cooldown.json.lock` directory the bash
 // router also uses. A lock older than 30 s is broken; a live one is waited on for up to 10 s,
-// then the write is skipped (returns false) rather than raced.
-function withCooldownLock(change: (data: Record<string, number>) => Record<string, number>): boolean {
+// then the write is skipped (returns false) rather than raced. Both cases are logged as bash does.
+type Log = (text: string) => void;
+const toStderr: Log = (text) => { process.stderr.write(text); };
+
+function withCooldownLock(change: (data: Record<string, number>) => Record<string, number>, log: Log = toStderr): boolean {
   ensure();
   const file = cooldownFile();
   const lock = `${file}.lock`;
@@ -40,12 +43,17 @@ function withCooldownLock(change: (data: Record<string, number>) => Record<strin
       break;
     } catch {
       try {
-        if (Date.now() - statSync(lock).mtimeMs > 30_000) {
+        const age = Math.floor((Date.now() - statSync(lock).mtimeMs) / 1000);
+        if (age > 30) {
+          log(`[ask-agent] removing stale cooldown lock (${age}s old)\n`);
           rmSync(lock, { recursive: true, force: true });
           continue;
         }
       } catch {}
-      if (Date.now() >= deadline) return false;
+      if (Date.now() >= deadline) {
+        log("[ask-agent] cooldown lock busy, skipping write\n");
+        return false;
+      }
       wait(100);
     }
   }
@@ -62,8 +70,9 @@ function withCooldownLock(change: (data: Record<string, number>) => Record<strin
   }
 }
 
-export function setCooldown(agent: string, until: number): void {
-  withCooldownLock((data) => ({ ...data, [agent]: until }));
+// `log` receives the lock's own lines, so a parallel run can replay them with the agent's stderr.
+export function setCooldown(agent: string, until: number, log: Log = toStderr): void {
+  withCooldownLock((data) => ({ ...data, [agent]: until }), log);
 }
 
 // Clears one agent's cooldown, or every cooldown when `agent` is empty. False when the lock was busy.

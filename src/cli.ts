@@ -79,7 +79,7 @@ function status(): number {
 if (original[0] === "status") process.exit(status());
 if (original[0] === "reset") {
   const agent = original[1] ?? "";
-  if (!clearCooldown(agent)) log("cooldown lock busy, skipping write");
+  clearCooldown(agent);
   log(`cooldown cleared ${agent || "for all agents"}`);
   process.exit(0);
 }
@@ -182,7 +182,8 @@ function changeDir(): void {
 if (!parallel) changeDir();
 if (!prompt) {
   if (process.stdin.isTTY) fail("error: no prompt given");
-  prompt = readFileSync(0, "utf8");
+  // Trailing newlines are dropped, as bash's $(cat) does in the bash router.
+  prompt = readFileSync(0, "utf8").replace(/\n+$/, "");
 }
 if (!prompt.trim()) fail("error: empty prompt");
 if (parallel) changeDir();

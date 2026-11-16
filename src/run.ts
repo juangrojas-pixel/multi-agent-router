@@ -128,7 +128,8 @@ function lastLines(output: string, count: number): string {
   return output.split("\n").slice(-count).map((line) => `${line} `).join("");
 }
 
-function withNewline(answer: string): string { return answer.endsWith("\n") ? answer : `${answer}\n`; }
+// One trailing newline, as the bash router prints an answer captured with $(...).
+function withNewline(answer: string): string { return `${answer.replace(/\n+$/, "")}\n`; }
 
 // Runs one agent, records the run and sets its cooldown on a quota error; prints nothing.
 async function execute(
@@ -173,11 +174,8 @@ async function execute(
     changedFiles(before, gitSnapshot()),
     role,
   );
-  let until: number | undefined;
-  if (quota) {
-    until = Math.floor(Date.now() / 1000) + (config.cooldown_seconds ?? 3600);
-    setCooldown(id, until);
-  }
+  // The cooldown is written by the caller after it logs the quota error, as the bash router does.
+  const until = quota ? Math.floor(Date.now() / 1000) + (config.cooldown_seconds ?? 3600) : undefined;
 
   if (result.status === 0 && answer.trim()) return { result: { ok: true, quota: false, reason: "", stderr: "" }, answer };
   if (result.timedOut) {
@@ -202,6 +200,7 @@ export async function runAgent(
 ): Promise<RunResult> {
   const { result, answer } = await execute(id, config, prompt, requestedModel, tier, effort, role);
   if (result.ok) process.stdout.write(withNewline(answer));
+  if (result.until !== undefined) setCooldown(id, result.until);
   return result;
 }
 
@@ -229,7 +228,10 @@ export async function attempt(
     return true;
   }
   err(`[ask-agent] ${result.stderr}\n`);
-  if (result.until !== undefined) err(`[ask-agent] ${id} cooled down until ${localStamp(result.until)}\n`);
+  if (result.until !== undefined) {
+    setCooldown(id, result.until, err);
+    err(`[ask-agent] ${id} cooled down until ${localStamp(result.until)}\n`);
+  }
   return false;
 }
 

@@ -25,7 +25,8 @@ function commandExists(command: string): boolean {
   return spawnSync("sh", ["-c", "command -v \"$1\"", "sh", command]).status === 0;
 }
 
-export function available(id: string, config: Config): string | null {
+// Readiness without asking the agent anything: disabled, command missing or cooling down.
+export function localReason(id: string, config: Config): string | null {
   const agent = config.agents[id];
   if (!agent?.enabled) return "disabled";
   if (!commandExists(agent.command)) return `command not found: ${agent.command}`;
@@ -34,6 +35,13 @@ export function available(id: string, config: Config): string | null {
     const time = new Date(until * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
     return `cooldown until ${time}`;
   }
+  return null;
+}
+
+export function available(id: string, config: Config): string | null {
+  const reason = localReason(id, config);
+  if (reason) return reason;
+  const agent = config.agents[id];
   if (id === "agy" && agent.quota) return agyQuotaReason(agent.command, agent.quota);
   return null;
 }

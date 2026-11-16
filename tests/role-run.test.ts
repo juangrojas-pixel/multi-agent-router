@@ -16,6 +16,7 @@ function roleConfig(roles?: object): AnyConfig {
     args: ["{model_args}", "{effort_args}", "{prompt}"],
     model_args: ["--model", "{model}"],
     effort_args: ["--thinking", "{effort}"],
+    effort_levels: ["low", "high"],
     output: "text",
   };
   if (roles) config.roles = roles;

@@ -30,11 +30,12 @@ ask-agent reset [agent]                  # clear cooldowns
 ask-agent --backend hc -a codex "question"   # run the agent in a live hc terminal
 ask-agent runs [N] [-a agent]            # run history, last N (default 20)
 bin/ask-agent-ts -r coder "task"         # run as a role (TypeScript router only)
+bin/ask-agent-ts roles                   # what each role resolves to, and readiness
 ```
 
 ### Roles
 
-`roles` in `agents.json` names who does what. Each role has a `description`, an ordered `agents` list and optional `model` and `effort` defaults. An entry is an agent id or `{ "agent", "model", "effort" }`; the entry's own value wins over the role default, which wins over the agent's `model`. The effort reaches the agent through its `effort_args` (for example `["--thinking", "{effort}"]`); an agent without `effort_args` ignores it.
+`roles` in `agents.json` names who does what. Each role has a `description`, an ordered `agents` list and optional `model` and `effort` defaults. An entry is an agent id or `{ "agent", "model", "effort" }`; the entry's own value wins over the role default, which wins over the agent's `model`. The effort reaches the agent through its `effort_args` (for example `["--thinking", "{effort}"]`), and a role may set it only on an agent that declares `effort_levels`.
 
 ```json
 "roles": {
@@ -44,6 +45,23 @@ bin/ask-agent-ts -r coder "task"         # run as a role (TypeScript router only
 ```
 
 `-r ROLE` (or `--role ROLE`) runs the task on the role's agents in order. An entry that is disabled, not installed or in cooldown is skipped; one that hits a quota error (which also sets its cooldown), times out, fails or answers nothing hands the task to the next. Each step prints `[ask-agent] role NAME: AGENT failed (REASON), trying NEXT` on stderr; when no entry can answer, the last line is `[ask-agent] role NAME: no agent could run` and the exit status is 2. Per-agent `fallback` lists apply to `-a` only, never to roles. It cannot be combined with `-a`, `-t` or `-m` (exit 2). An unknown role exits 2 with `unknown role: NAME (configured: ...)`; a config without roles exits 2 with `no roles configured`. Role runs record `role` in `runs.jsonl` (empty for `-a` and `-t` runs).
+
+`roles` prints one tab-separated line per role entry: `role agent model effort ready reason`, with `-` for an unset model or effort, `ready` `yes` or `no`, and `reason` `disabled`, `not installed` or `cooldown until HH:MM`. It never starts an agent (agy's quota is not queried). When `orchestrator` is set, the first line is `orchestrator AGENT`. Exit 0 even when entries are not ready.
+
+#### Agent keys
+
+Besides `enabled`, `command`, `model`, `timeout_seconds`, `extra_args`, `fallback` and `quota`, an agent may declare:
+
+- `args`: argument template with `{prompt}`, `{timeout}` and the insertion points `{model_args}`, `{effort_args}`, `{extra_args}`. Built-in templates exist for `codex`, `agy`, `opencode` and `gentle-shell`; any other agent needs `args`.
+- `model_args`: fragment added when a model is set, for example `["--model", "{model}"]`.
+- `effort_args`: fragment added when an effort is set, for example `["--thinking", "{effort}"]`.
+- `output`: how the answer is read from stdout: `text`, `agy-json` or `opencode-events`.
+- `models`: models a role may set; absent means any.
+- `effort_levels`: effort levels a role may set; absent or empty means none.
+
+#### Config checks
+
+The TypeScript router checks the whole config before any command and stops with exit 2 and `[ask-agent] config: KEY: MESSAGE` on: a role with no agents (`roles.NAME.agents`), an entry naming an unknown agent, a model outside the agent's `models`, an effort on an agent without `effort_levels` or outside them (`roles.NAME.agents[i]`), an unknown `orchestrator.agent`, an unknown `routing.rules[i].role`, and an unknown `agents.ID.output`. A repeated agent inside a role is not an error; it is tried once.
 
 ### Run history
 

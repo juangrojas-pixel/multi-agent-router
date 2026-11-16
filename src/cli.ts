@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { loadConfig, type Config } from "./config.ts";
-import { resolveRole, runRole, type RoleEntry } from "./roles.ts";
+import { loadConfig, validateConfig, type Config } from "./config.ts";
+import { listRoles, resolveRole, runRole, type RoleEntry } from "./roles.ts";
 import { available, runAgent } from "./run.ts";
 
 const original = process.argv.slice(2);
@@ -15,12 +15,25 @@ function handoff(): never {
   process.exit(result.status ?? 2);
 }
 
-if (["parallel", "status", "reset", "runs"].includes(original[0] ?? "")) handoff();
+const handedOff = ["parallel", "status", "reset", "runs"].includes(original[0] ?? "");
+let config: Config;
+try {
+  config = loadConfig();
+} catch (error) {
+  // An unreadable config keeps the bash router's own message for the commands it still owns.
+  if (handedOff) handoff();
+  fail(`config: ${(error as Error).message}`);
+}
+const mistake = validateConfig(config);
+if (mistake) fail(`config: ${mistake}`);
+
+if (original[0] === "roles") {
+  process.stdout.write(listRoles(config));
+  process.exit(0);
+}
+if (handedOff) handoff();
 if (original.some((value, index) => value === "--backend" && original[index + 1] === "hc")) handoff();
 if (process.env.ASK_AGENT_DEPTH) fail("error: nested call refused: ask-agent is already running an agent");
-
-let config: Config;
-try { config = loadConfig(); } catch (error) { fail(`config: ${(error as Error).message}`); }
 
 function selectedAgents(args: string[], value: Config): string[] {
   const roleIndex = args.findIndex((arg) => arg === "-r" || arg === "--role");
@@ -70,6 +83,7 @@ for (let index = 0; index < original.length; index += 1) {
       "Usage:",
       "  ask-agent [-t TIER | -a AGENT] [-m MODEL] [-C DIR] [PROMPT]   first ready agent answers",
       "  ask-agent -r ROLE [-C DIR] [PROMPT]                           run as a role from agents.json",
+      "  ask-agent roles                                               role entries: agent, model, effort, ready",
       "  ask-agent parallel [-t TIER | -a A,B] [-C DIR] [PROMPT]       every ready agent answers",
       "  ask-agent status                                              readiness, tiers, agy quota",
       "  ask-agent reset [AGENT]                                       clear cooldowns",
@@ -77,6 +91,8 @@ for (let index = 0; index < original.length; index += 1) {
       "Tiers: think | execute | draft (see agents.json). Prompt is read from stdin if omitted.",
       "-r/--role ROLE: run on the role's agents in order, with the role's model and effort;",
       "  cannot be combined with -a, -t or -m.",
+      "Agent keys: args, model_args, effort_args, output, models, effort_levels (see README).",
+      "The config is checked before any command; a mistake exits 2 naming its key.",
       "--backend hc|subprocess: run agents in live hc terminals or as plain subprocesses.",
       "",
     ].join("\n"));

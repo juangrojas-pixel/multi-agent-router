@@ -1,5 +1,5 @@
 import type { Config } from "./config.ts";
-import { available, runAgent } from "./run.ts";
+import { available, localReason, runAgent } from "./run.ts";
 
 export type RoleEntry = { agent: string; model: string; effort: string };
 
@@ -29,8 +29,8 @@ export function resolveRole(config: Config, name: string): RoleEntry[] {
 export async function runRole(config: Config, name: string, entries: RoleEntry[], prompt: string): Promise<boolean> {
   const log = (message: string) => process.stderr.write(`[ask-agent] role ${name}: ${message}\n`);
   for (const [index, entry] of entries.entries()) {
-    let reason = available(entry.agent, config);
-    if (reason?.startsWith("command not found")) reason = "not installed";
+    const reason0 = available(entry.agent, config);
+    let reason = reason0?.startsWith("command not found") ? "not installed" : reason0;
     if (!reason) {
       process.stderr.write(`[ask-agent] using ${entry.agent}\n`);
       const result = await runAgent(entry.agent, config, prompt, entry.model, "", entry.effort, name);
@@ -42,4 +42,19 @@ export async function runRole(config: Config, name: string, entries: RoleEntry[]
   }
   log("no agent could run");
   return false;
+}
+
+// One tab-separated line per role entry: role, agent, model, effort, ready, reason.
+// Readiness is local only (no quota call), so listing never starts an agent.
+export function listRoles(config: Config): string {
+  const lines: string[] = [];
+  if (config.orchestrator) lines.push(`orchestrator\t${config.orchestrator.agent}`);
+  for (const name of Object.keys(config.roles ?? {})) {
+    for (const entry of resolveRole(config, name)) {
+      const raw = localReason(entry.agent, config);
+      const reason = raw?.startsWith("command not found") ? "not installed" : raw ?? "";
+      lines.push([name, entry.agent, entry.model || "-", entry.effort || "-", reason ? "no" : "yes", reason].join("\t"));
+    }
+  }
+  return lines.map((line) => `${line}\n`).join("");
 }

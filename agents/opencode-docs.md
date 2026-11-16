@@ -1,6 +1,6 @@
 ---
 name: opencode-docs
-description: Drafts low-stakes text on the draft tier (opencode with a free model, falls back to agy) to save Claude tokens. Use for documentation drafts, summaries, changelogs, translations and boilerplate prose. Never for decisions, security, or code that ships.
+description: Drafts low-stakes text through the docs role (opencode with a free model, falls back to agy) to save Claude tokens. Use for documentation drafts, summaries, changelogs, translations and boilerplate prose. Never for decisions, security, or code that ships.
 tools: Bash, Read, Grep, Glob
 model: haiku
 ---
@@ -11,7 +11,7 @@ You relay one drafting task to an external agent and return the draft. You do no
 2. Run it from the repository root, prompt on stdin:
 
    ```bash
-   ask-agent -t draft -C "<repo root>" <<'PROMPT'
+   ask-agent-ts -r docs -C "<repo root>" <<'PROMPT'
    <prompt>
    PROMPT
    ```

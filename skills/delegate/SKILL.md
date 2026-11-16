@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: Delegate work to external agent CLIs (codex/pi, agy, opencode, gentle-shell) by tier through ask-agent. Trigger: second opinion, ask codex/agy/opencode/gentle-shell, use other agents, save Claude tokens, draft docs cheaply, parallel opinions, compare models.
+description: Delegate work to external agent CLIs (codex/pi, agy, opencode, gentle-shell) by role or tier through ask-agent. Trigger: second opinion, ask codex/agy/opencode/gentle-shell, use other agents, save Claude tokens, draft docs cheaply, parallel opinions, compare models.
 ---
 
 # Delegate to external agents
@@ -11,7 +11,13 @@ Client servers, OCI and databases: Claude or gentle-shell; agy read-only (report
 
 Trust the receipt: check one thing (the file exists, or one command) and never reread, redo or rewrite the agent's work; that doubles the cost. The limits (stay inside the working directory, no push, publish, data deletion or remote servers) are enforced by instruction, not by sandbox. Delegate from a clean git tree and check `git status` afterwards. `ask-agent` refuses nested calls, so an agent cannot route back into another agent.
 
+## Pick the role
+
+Roles in `agents.json` name who does what, in order, with model and effort. When a role fits the task, call by role: `ask-agent-ts roles` lists them with readiness, and `ask-agent-ts -r ROLE -C "$PWD" "<prompt>"` runs the first ready agent of the role and falls through to the next on quota, timeout or failure. The `-r` call form uses `ask-agent-ts` until `ask-agent` on PATH points at the TypeScript router.
+
 ## Pick the tier
+
+When no role fits, pick a tier or an agent.
 
 | Tier | Agents (in order) | Use for | Never for |
 |---|---|---|---|
@@ -24,7 +30,7 @@ If the task is small and you already have the context, do it yourself: delegatio
 
 ## How to call
 
-Subagents keep long answers out of your context: `codex-thinker` (think), `agy-worker` (execute), `opencode-docs` (draft).
+Subagents keep long answers out of your context: `codex-thinker` (think), `agy-worker` (execute), `opencode-docs` (the `docs` role).
 
 Direct call, prompt on stdin:
 

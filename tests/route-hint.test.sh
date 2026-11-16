@@ -112,6 +112,42 @@ out="$(context "que conviene mas para esta arquitectura")"
 [[ "$out" == *'ask-agent -a gentle-shell'* ]]; check "other agent's cooldown does not block" $?
 rm -f "$XDG_CACHE_HOME/multi-agent-router/cooldown.json"
 
+# Unmatched prompts get the generated role guidance followed by the routing notes.
+out="$(context "hola, como va")"
+[[ "$out" == *'ask-agent-ts -r coder -C <dir>'* && "$out" == *'AUTO-ROUTING'* ]]; check "unmatched gets role guidance and notes" $?
+
+# A rule naming a role routes through ask-agent-ts -r; an agent rule keeps its directive.
+ROLECFG="$SCRATCH/role.json"
+jq '.routing.rules = [{id: "role-test", match: "zzrolecheck", role: "coder", verify: "VERIFY-IT"}] + .routing.rules' \
+  "$ROOT/agents.json" >"$ROLECFG"
+rcontext() { jq -n --arg p "$1" '{prompt: $p}' | ASK_AGENT_CONFIG="$ROLECFG" "$HINT" | jq -r '.hookSpecificOutput.additionalContext // ""'; }
+out="$(rcontext "zzrolecheck please")"
+[[ "$out" == *'ROUTE NOW'* && "$out" == *'ask-agent-ts -r coder -C <dir>'* && "$out" != *'ask-agent -a'* && "$out" == *'VERIFY-IT'* ]]
+check "role rule routes with ask-agent-ts -r" $?
+[[ "$(tail -n 1 "$LOG" | jq -r '.role')" == coder ]]; check "role rule logs its role" $?
+out="$(rcontext "que conviene mas para esta arquitectura")"
+[[ "$out" == *'ask-agent -a gentle-shell -C <dir>'* ]]; check "agent rule unchanged next to a role rule" $?
+
+# A role rule skips delegation only when every agent of the role is in cooldown.
+echo "{\"gentle-shell\": $(($(date +%s) + 600))}" >"$XDG_CACHE_HOME/multi-agent-router/cooldown.json"
+out="$(rcontext "zzrolecheck please")"
+[[ "$out" == *'ROUTE NOW'* ]]; check "role with one ready agent still routes" $?
+echo "{\"gentle-shell\": $(($(date +%s) + 600)), \"agy\": $(($(date +%s) + 900))}" >"$XDG_CACHE_HOME/multi-agent-router/cooldown.json"
+out="$(rcontext "zzrolecheck please")"
+[[ "$out" == 'SKIP DELEGATION'*'role coder'*'cooldown'* && "$out" != *'ROUTE NOW'* ]]; check "role with every agent cooling down is skipped" $?
+[[ "$(tail -n 1 "$LOG" | jq -r '.cooldown')" == true ]]; check "role skip logs cooldown true" $?
+rm -f "$XDG_CACHE_HOME/multi-agent-router/cooldown.json"
+
+# When the guidance command fails or prints nothing, unmatched prompts fall back to routing.general.
+BADCFG="$SCRATCH/bad.json"
+jq '.roles.coder.agents = ["ghost"] | .routing.general = "GENERAL-FALLBACK"' "$ROOT/agents.json" >"$BADCFG"
+out="$(jq -n '{prompt: "hola, como va"}' | ASK_AGENT_CONFIG="$BADCFG" "$HINT" | jq -r '.hookSpecificOutput.additionalContext')"
+[[ "$out" == 'GENERAL-FALLBACK' ]]; check "failing guidance falls back to general" $?
+EMPTYCFG="$SCRATCH/empty.json"
+jq 'del(.roles) | del(.routing.notes) | .routing.general = "GENERAL-FALLBACK"' "$ROOT/agents.json" >"$EMPTYCFG"
+out="$(jq -n '{prompt: "hola, como va"}' | ASK_AGENT_CONFIG="$EMPTYCFG" "$HINT" | jq -r '.hookSpecificOutput.additionalContext')"
+[[ "$out" == 'GENERAL-FALLBACK' ]]; check "empty guidance falls back to general" $?
+
 # --stats summarizes the log per rule.
 "$HINT" --stats | rg -q 'design'; check "stats lists rules" $?
 

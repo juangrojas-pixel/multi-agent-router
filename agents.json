@@ -31,6 +31,9 @@
       ]
     }
   },
+  "orchestrator": {
+    "agent": "claude"
+  },
   "agents": {
     "codex": {
       "enabled": true,
@@ -76,11 +79,30 @@
       "timeout_seconds": 1800,
       "extra_args": [],
       "prompt_preamble": "You are an executor called by another agent. Do the task end to end: create and edit files and run the commands it needs, including client servers, OCI CLI and databases when the task asks for it. The VCE guards run on every tool call. When a guard blocks a command with CONFIRMACION REQUERIDA, stop the task and reply with the guard message and the exact blocked command; never add HOOK_CONFIRMADO=1 unless this task says the user confirmed that exact command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result."
+    },
+    "claude": {
+      "enabled": false,
+      "command": "claude",
+      "model": null,
+      "timeout_seconds": 600,
+      "extra_args": [],
+      "args": [
+        "-p",
+        "{model_args}",
+        "{extra_args}",
+        "{prompt}"
+      ],
+      "model_args": [
+        "--model",
+        "{model}"
+      ],
+      "output": "text"
     }
   },
   "routing": {
     "general": "AUTO-ROUTING (multi-agent-router). Goal: save Claude tokens. Delegate the whole task, writing included, and call by agent (`ask-agent -a <agent> -C <dir>`), never by tier. agy and opencode: easy, well-specified work (templates, docs, summaries, mechanical edits). gentle-shell: work that needs real thinking (architecture, design, root cause, review, complex documents). codex: read-only second opinion. Executors write files in -C DIR and return a receipt. Trust the receipt: check one thing (the file exists, or one command) and never reread, redo or rewrite their work. Client servers/OCI/DBs: you or gentle-shell (the VCE guards run on both); agy only read-only (reports: gather evidence and write them, guarded and read-only by hook); never opencode or codex. When gentle-shell reports CONFIRMACION REQUERIDA, relay it to the user (what, which client and compartment) and stop; only on an explicit yes, re-run gentle-shell saying the user confirmed that exact command, so it retries with HOOK_CONFIRMADO=1. Secrets and trivial lookups stay inline. On quota or error, do it yourself and say so in one line. Mention which agent answered.",
-    "directive": "ROUTE NOW (multi-agent-router, user-authorized standing rule): this prompt matches `{rule}`. Before doing it yourself, run `ask-agent -a {agent} -C <dir> \"<self-contained task with the needed context and file paths>\"`. {verify} If the task turns out to touch client servers/OCI/DBs, hand it to gentle-shell (agy only for read-only report work) or do it yourself; secrets stay inline; if the agent fails, do it yourself (say so in one line). Mention which agent answered.",
+    "notes": "AUTO-ROUTING (multi-agent-router). Goal: save Claude tokens. Delegate the whole task, writing included, and call by agent (`ask-agent -a <agent> -C <dir>`), never by tier. agy and opencode: easy, well-specified work (templates, docs, summaries, mechanical edits). gentle-shell: work that needs real thinking (architecture, design, root cause, review, complex documents). codex: read-only second opinion. Executors write files in -C DIR and return a receipt. Trust the receipt: check one thing (the file exists, or one command) and never reread, redo or rewrite their work. Client servers/OCI/DBs: you or gentle-shell (the VCE guards run on both); agy only read-only (reports: gather evidence and write them, guarded and read-only by hook); never opencode or codex. When gentle-shell reports CONFIRMACION REQUERIDA, relay it to the user (what, which client and compartment) and stop; only on an explicit yes, re-run gentle-shell saying the user confirmed that exact command, so it retries with HOOK_CONFIRMADO=1. Secrets and trivial lookups stay inline. On quota or error, do it yourself and say so in one line. Mention which agent answered.",
+    "directive": "ROUTE NOW (multi-agent-router, user-authorized standing rule): this prompt matches `{rule}`. Before doing it yourself, run `{call} -C <dir> \"<self-contained task with the needed context and file paths>\"`. {verify} If the task turns out to touch client servers/OCI/DBs, hand it to gentle-shell (agy only for read-only report work) or do it yourself; secrets stay inline; if the agent fails, do it yourself (say so in one line). Mention which agent answered.",
     "rules": [
       {
         "id": "inline-explicit",

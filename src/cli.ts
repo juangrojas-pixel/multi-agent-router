@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadConfig, validateConfig, type Config } from "./config.ts";
+import { guidance } from "./guidance.ts";
 import { listRoles, resolveRole, runRole, type RoleEntry } from "./roles.ts";
 import { available, runAgent } from "./run.ts";
 
@@ -29,6 +30,10 @@ if (mistake) fail(`config: ${mistake}`);
 
 if (original[0] === "roles") {
   process.stdout.write(listRoles(config));
+  process.exit(0);
+}
+if (original[0] === "guidance") {
+  process.stdout.write(guidance(config));
   process.exit(0);
 }
 if (handedOff) handoff();
@@ -84,6 +89,7 @@ for (let index = 0; index < original.length; index += 1) {
       "  ask-agent [-t TIER | -a AGENT] [-m MODEL] [-C DIR] [PROMPT]   first ready agent answers",
       "  ask-agent -r ROLE [-C DIR] [PROMPT]                           run as a role from agents.json",
       "  ask-agent roles                                               role entries: agent, model, effort, ready",
+      "  ask-agent guidance                                            routing guidance for the orchestrator",
       "  ask-agent parallel [-t TIER | -a A,B] [-C DIR] [PROMPT]       every ready agent answers",
       "  ask-agent status                                              readiness, tiers, agy quota",
       "  ask-agent reset [AGENT]                                       clear cooldowns",

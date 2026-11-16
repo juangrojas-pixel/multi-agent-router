@@ -14,7 +14,7 @@ export type RoleAgent = string | { agent: string; model?: string; effort?: strin
 export type Role = { description: string; agents: RoleAgent[]; model?: string; effort?: string };
 export type Config = {
   cooldown_seconds?: number; default_tier?: string; tiers?: Record<string, string[]>; agents: Record<string, Agent>;
-  roles?: Record<string, Role>; orchestrator?: { agent: string }; routing?: { rules?: Array<{ role?: string }> };
+  roles?: Record<string, Role>; orchestrator?: { agent: string }; routing?: { notes?: string; general?: string; rules?: Array<{ role?: string }> };
   prompt_preamble?: string; backend?: string;
 };
 

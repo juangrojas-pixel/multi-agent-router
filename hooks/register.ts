@@ -1,13 +1,12 @@
 import type { Register } from 'claude-code'
 
-// The routing policy lives in agents.json (`routing.general`); bin/route-hint turns it
-// into a per-prompt directive. This section only frames it, so the two never disagree.
+// The guidance comes from the router (`bin/ask-agent-ts guidance`, generated from the roles in
+// agents.json); bin/route-hint uses the same text when no rule matches. This frame names no
+// agent, role or rule of its own, so the adapter holds no routing logic.
 const FRAME = `## External agents (multi-agent-router)
 
-Delegate through \`ask-agent -a <agent>\` (Bash). Per-prompt routing directives come from
-the route-hint hook and follow agents.json. gentle-shell, agy and opencode are executors that
-write inside -C DIR and return a receipt; codex is a read-only advisor. Trust the receipt:
-check one thing, never redo their work. You stay the final judge.`
+Delegate through the router (Bash) as the guidance below says. Per-prompt routing directives
+come from the route-hint hook. You stay the final judge.`
 
 // Keeps the injected readiness short: one line per agent, no quota table.
 function summarize(status: string): string {
@@ -34,7 +33,17 @@ export const register: Register = on => {
     const started = await next(e)
     // Shown at once so the person sees the hook ran while the slow check is pending.
     $.ui.status('agents: checking…')
-    void (async () => {
+    // Called by path under the plugin root, never through `ask-agent` on PATH; awaited so the
+    // first prompt already carries it. Falls back to `routing.general` when it fails or is empty.
+    try {
+      const { exitCode, stdout } = await $.process.run([`${$.plugin.root}/bin/ask-agent-ts`, 'guidance'], {
+        timeoutMs: 5_000,
+      })
+      if (exitCode === 0) policy = stdout.trim()
+    } catch (error) {
+      $.ui.log(`multi-agent-router: guidance failed: ${String(error)}`, { to: 'debug' })
+    }
+    if (!policy) {
       try {
         const { exitCode, stdout } = await $.process.run(
           ['jq', '-r', '.routing.general // empty', `${$.plugin.root}/agents.json`],
@@ -44,7 +53,7 @@ export const register: Register = on => {
       } catch (error) {
         $.ui.log(`multi-agent-router: policy read failed: ${String(error)}`, { to: 'debug' })
       }
-    })()
+    }
     void (async () => {
       try {
         const { exitCode, stdout } = await $.process.run([`${$.plugin.root}/bin/ask-agent`, 'status'], {

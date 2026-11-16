@@ -14,7 +14,7 @@ Executors (gentle-shell, agy, opencode) do the whole task, writing included, ins
 
 - `bin/ask-agent`: router. Refuses nested calls (`ASK_AGENT_DEPTH`), prepends a `prompt_preamble` to every prompt: the agent's own (executor) or the global read-only one (advisor). Tier fallback, per-agent `fallback` for `-a` calls (opencode falls back to agy), agy quota check via `agy -p /usage` (0 tokens), reactive quota-error cooldown, per-agent timeout that kills the whole process group.
 - `agents.json`: tiers, models, timeouts, quota threshold, enabled flags, and `routing` (the single routing policy: general text, directive template, ordered rules; inline rules first, first match wins).
-- `bin/route-hint`: `UserPromptSubmit` hook. Matches the prompt against `routing.rules` and injects a concrete `ROUTE NOW ... ask-agent -a <agent>` directive, nothing for inline rules, or the general policy when no rule matches. When the matched agent is in cooldown (out of quota, from `ask-agent`'s `cooldown.json`), it injects a `SKIP DELEGATION` note instead, until the cooldown expires. Logs each decision to `~/.cache/multi-agent-router/route.jsonl` (rule, agent, prompt length; never the prompt text). `route-hint --stats` counts decisions per rule. Rule order (first match wins): `inline-explicit`, `explicit-delegate` (user asks for agents, even on client work), `inline-sensitive` (secrets, restarts, opening ports), `report-doc` and `client-text` (agy), `client-work` (gentle-shell), then `second-opinion`, `design`, `docs`, `spec`. Client work hands context over through engram: the caller saves `topic_key=handoff/actual` in the client's project and the agent reads it with `mem_search`; agy, gentle-shell, codex and opencode share `~/.engram/engram.db`. Tests: `tests/route-hint.test.sh`, `tests/ask-agent.test.sh`.
+- `bin/route-hint`: `UserPromptSubmit` hook. Matches the prompt against `routing.rules` and injects a concrete `ROUTE NOW ... ask-agent -a <agent>` directive, nothing for inline rules, or the router guidance (`bin/ask-agent-ts guidance`, falling back to `routing.general`) when no rule matches. When the matched agent is in cooldown (out of quota, from `ask-agent`'s `cooldown.json`), it injects a `SKIP DELEGATION` note instead, until the cooldown expires. Logs each decision to `~/.cache/multi-agent-router/route.jsonl` (rule, agent, prompt length; never the prompt text). `route-hint --stats` counts decisions per rule. Rule order (first match wins): `inline-explicit`, `explicit-delegate` (user asks for agents, even on client work), `inline-sensitive` (secrets, restarts, opening ports), `report-doc` and `client-text` (agy), `client-work` (gentle-shell), then `second-opinion`, `design`, `docs`, `spec`. Client work hands context over through engram: the caller saves `topic_key=handoff/actual` in the client's project and the agent reads it with `mem_search`; agy, gentle-shell, codex and opencode share `~/.engram/engram.db`. Tests: `tests/route-hint.test.sh`, `tests/ask-agent.test.sh`.
 - `agents/`: subagents `codex-thinker`, `agy-worker`, `opencode-docs`.
 - `skills/delegate`: tier policy and how to delegate.
 - `hooks/register.ts`: checks readiness at session start (status line) and injects a short frame, `routing.general` and readiness into the system prompt.
@@ -62,6 +62,19 @@ Besides `enabled`, `command`, `model`, `timeout_seconds`, `extra_args`, `fallbac
 #### Config checks
 
 The TypeScript router checks the whole config before any command and stops with exit 2 and `[ask-agent] config: KEY: MESSAGE` on: a role with no agents (`roles.NAME.agents`), an entry naming an unknown agent, a model outside the agent's `models`, an effort on an agent without `effort_levels` or outside them (`roles.NAME.agents[i]`), an unknown `orchestrator.agent`, an unknown `routing.rules[i].role`, and an unknown `agents.ID.output`. A repeated agent inside a role is not an error; it is tried once.
+
+### Orchestrator and adapters
+
+`orchestrator` in `agents.json` (`{ "agent": "claude" }`) says which agent orchestrates. It is informational: `roles` lists it first and nothing routes by it. The orchestrator agent must exist in `agents`; the example `claude` entry is disabled so no tier or role picks it as a delegate.
+
+`ask-agent-ts guidance` prints the routing guidance for whichever agent orchestrates: one line per role with its description and the call to make, then `routing.notes`. It names no orchestrating product. The call form is `ask-agent-ts -r ROLE` until `ask-agent` on PATH points at the TypeScript router (phase 8).
+
+Two adapters deliver that same text and hold no rule, role or agent name of their own. Both call `bin/ask-agent-ts` by path and fall back to `routing.general` when it fails or prints nothing:
+
+- Claude Code: `hooks/register.ts` adds it to the system prompt with the agent readiness line, and `bin/route-hint` injects it for prompts that match no rule.
+- gentle-shell: `adapters/gentle-shell/orchestrate [ARGS]` starts `gentle-shell -- --append-system-prompt "<guidance>" ARGS`.
+
+A `routing.rules` entry names an `agent` (directive `ask-agent -a AGENT`) or a `role` (directive `ask-agent-ts -r ROLE`); the directive template takes `{call}` for that command, plus `{rule}`, `{agent}` (the agent or role name) and `{verify}`. A role rule skips delegation only when every agent of the role is in cooldown.
 
 ### Run history
 

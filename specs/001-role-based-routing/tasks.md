@@ -72,13 +72,13 @@ before its implementation. Tests go through the CLI and use stub agents from
 
 **Independent test**: change a role description; `ask-agent guidance` reflects it.
 
-- [ ] T022 [US4] Write failing tests in `tests/guidance.test.ts`: one line per role with its description and the call form `ask-agent -r NAME -C <dir> "<task>"`; `routing.notes` appended when set; the text contains no orchestrator product name whichever agent `orchestrator.agent` names; no roles prints only the notes with exit 0; a call with `ASK_AGENT_DEPTH` set to `-r` is still refused
-- [ ] T023 [US4] Implement `src/guidance.ts` and the `guidance` command in `src/cli.ts`
-- [ ] T024 [US4] Write failing checks first in `hooks/register.test.ts`, `tests/route-hint.test.sh` and a new `tests/adapter-gentle-shell.test.ts` (stub `gentle-shell` on PATH): each adapter delivers the output of `guidance`; each falls back to `routing.general` when the guidance command fails or prints nothing; a `role` rule in `route-hint` produces a directive calling `ask-agent-ts -r ROLE`; a `role` rule injects `SKIP DELEGATION` only when every agent of that role is in cooldown; an existing `agent` rule is unchanged
-- [ ] T025 [US4] Switch `hooks/register.ts` to deliver the output of `bin/ask-agent-ts guidance`, called by its path under the plugin root and never through `ask-agent` on PATH, plus the readiness line; fall back to reading `routing.general` when that call fails or is empty
-- [ ] T026 [US4] Make `bin/route-hint` use `bin/ask-agent-ts guidance` (by path next to itself) for its no-match text with the same fall back to `routing.general`, and accept `role` in a rule with the cooldown rule tested in T024, keeping `agent` rules working
-- [ ] T027 [US4] Create `adapters/gentle-shell/orchestrate`: starts `gentle-shell -- --append-system-prompt "$(bin/ask-agent-ts guidance)" "$@"` resolving the router by path, and nothing else
-- [ ] T028 [US4] Add an example `claude` agent entry and an `orchestrator` key to `agents.json`, and document both adapters and the `orchestrator` key in `README.md`
+- [x] T022 [US4] Write failing tests in `tests/guidance.test.ts`: one line per role with its description and the call form `ask-agent -r NAME -C <dir> "<task>"`; `routing.notes` appended when set; the text contains no orchestrator product name whichever agent `orchestrator.agent` names; no roles prints only the notes with exit 0; a call with `ASK_AGENT_DEPTH` set to `-r` is still refused
+- [x] T023 [US4] Implement `src/guidance.ts` and the `guidance` command in `src/cli.ts`
+- [x] T024 [US4] Write failing checks first in `hooks/register.test.ts`, `tests/route-hint.test.sh` and a new `tests/adapter-gentle-shell.test.ts` (stub `gentle-shell` on PATH): each adapter delivers the output of `guidance`; each falls back to `routing.general` when the guidance command fails or prints nothing; a `role` rule in `route-hint` produces a directive calling `ask-agent-ts -r ROLE`; a `role` rule injects `SKIP DELEGATION` only when every agent of that role is in cooldown; an existing `agent` rule is unchanged
+- [x] T025 [US4] Switch `hooks/register.ts` to deliver the output of `bin/ask-agent-ts guidance`, called by its path under the plugin root and never through `ask-agent` on PATH, plus the readiness line; fall back to reading `routing.general` when that call fails or is empty
+- [x] T026 [US4] Make `bin/route-hint` use `bin/ask-agent-ts guidance` (by path next to itself) for its no-match text with the same fall back to `routing.general`, and accept `role` in a rule with the cooldown rule tested in T024, keeping `agent` rules working
+- [x] T027 [US4] Create `adapters/gentle-shell/orchestrate`: starts `gentle-shell -- --append-system-prompt "$(bin/ask-agent-ts guidance)" "$@"` resolving the router by path, and nothing else
+- [x] T028 [US4] Add an example `claude` agent entry and an `orchestrator` key to `agents.json`, and document both adapters and the `orchestrator` key in `README.md`
 
 **Checkpoint**: the router no longer assumes Claude Code.
 

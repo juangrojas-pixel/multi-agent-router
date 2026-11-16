@@ -33,27 +33,23 @@ export const register: Register = on => {
     const started = await next(e)
     // Shown at once so the person sees the hook ran while the slow check is pending.
     $.ui.status('agents: checking…')
-    // Called by path under the plugin root, never through `ask-agent` on PATH; awaited so the
-    // first prompt already carries it. Falls back to `routing.general` when it fails or is empty.
-    try {
-      const { exitCode, stdout } = await $.process.run([`${$.plugin.root}/bin/ask-agent-ts`, 'guidance'], {
-        timeoutMs: 5_000,
-      })
-      if (exitCode === 0) policy = stdout.trim()
-    } catch (error) {
-      $.ui.log(`multi-agent-router: guidance failed: ${String(error)}`, { to: 'debug' })
-    }
-    if (!policy) {
+    // The guidance is called by path under the plugin root, never through `ask-agent` on PATH;
+    // `routing.general` is its fall back when it fails or is empty. Both run at once and are
+    // awaited, so the first prompt carries the policy and session start waits 5 s at most.
+    const read = async (argv: string[], what: string): Promise<string> => {
       try {
-        const { exitCode, stdout } = await $.process.run(
-          ['jq', '-r', '.routing.general // empty', `${$.plugin.root}/agents.json`],
-          { timeoutMs: 5_000 },
-        )
-        if (exitCode === 0) policy = stdout.trim()
+        const { exitCode, stdout } = await $.process.run(argv, { timeoutMs: 5_000 })
+        return exitCode === 0 ? stdout.trim() : ''
       } catch (error) {
-        $.ui.log(`multi-agent-router: policy read failed: ${String(error)}`, { to: 'debug' })
+        $.ui.log(`multi-agent-router: ${what} failed: ${String(error)}`, { to: 'debug' })
+        return ''
       }
     }
+    const [guidance, general] = await Promise.all([
+      read([`${$.plugin.root}/bin/ask-agent-ts`, 'guidance'], 'guidance'),
+      read(['jq', '-r', '.routing.general // empty', `${$.plugin.root}/agents.json`], 'policy read'),
+    ])
+    policy = guidance || general
     void (async () => {
       try {
         const { exitCode, stdout } = await $.process.run([`${$.plugin.root}/bin/ask-agent`, 'status'], {

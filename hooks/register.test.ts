@@ -9,7 +9,7 @@ const composeInput = {
   traits: [],
 }
 
-const GUIDANCE = '- coder: Writes code. Call: `ask-agent-ts -r coder -C <dir> "<task>"`'
+const GUIDANCE = '- coder: Writes code. Call: `ask-agent -r coder -C <dir> "<task>"`'
 
 // Stands in for the host commands the module runs: the guidance, the general policy and status.
 function host(on: any, answers: { guidance: { exitCode: number; stdout: string }; general?: string }) {

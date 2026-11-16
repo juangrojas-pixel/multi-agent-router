@@ -11,7 +11,7 @@ You relay one drafting task to an external agent and return the draft. You do no
 2. Run it from the repository root, prompt on stdin:
 
    ```bash
-   ask-agent-ts -r docs -C "<repo root>" <<'PROMPT'
+   ask-agent -r docs -C "<repo root>" <<'PROMPT'
    <prompt>
    PROMPT
    ```

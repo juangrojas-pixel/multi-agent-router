@@ -1,8 +1,8 @@
 import type { Config } from "./config.ts";
 
-// The command the guidance tells the orchestrator to run. It stays `ask-agent-ts` until the
-// switch in phase 8 points `ask-agent` on PATH at this router (user decision, 2026-11-16).
-export const ROUTER_CALL = "ask-agent-ts";
+// The command the guidance tells the orchestrator to run: `ask-agent` on PATH is this router
+// since the switch of phase 8 (T037, 2026-11-16).
+export const ROUTER_CALL = "ask-agent";
 
 // Routing guidance for whichever agent orchestrates: one line per role, then routing.notes.
 // It names no orchestrating product, so every adapter delivers the same text.

@@ -19,8 +19,8 @@ function config(extra: object): object {
 
 const roleLines = [
   "Delegate by role through the router. Each line is a role, what it is for, and the call to make:",
-  "- coder: Writes and edits code from a clear task. Call: `ask-agent-ts -r coder -C <dir> \"<task>\"`",
-  "- docs: Drafts low-stakes text. Call: `ask-agent-ts -r docs -C <dir> \"<task>\"`",
+  "- coder: Writes and edits code from a clear task. Call: `ask-agent -r coder -C <dir> \"<task>\"`",
+  "- docs: Drafts low-stakes text. Call: `ask-agent -r docs -C <dir> \"<task>\"`",
 ];
 
 test("guidance lists each role with its description and call form", () => {

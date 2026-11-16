@@ -26,14 +26,14 @@ prompt="$(jq -r '.prompt // ""')"
 [[ "$prompt" == *"<task-notification>"* || "$prompt" == *"[SYSTEM NOTIFICATION"* ]] && exit 0
 
 # First matching rule wins; inline rules come first in agents.json. A rule names an agent
-# (`ask-agent -a`) or a role (`ask-agent-ts -r`, until phase 8 moves `ask-agent` on PATH).
+# (`ask-agent -a`) or a role (`ask-agent -r`).
 decision="$(jq -c --arg p "$prompt" '
   .routing as $r
   | ([$r.rules[] | select(.match as $m | $p | test($m; "i"))] | first) as $hit
   | if $hit == null then {rule: "none", agent: null, text: null}
     elif $hit.agent == null and $hit.role == null then {rule: $hit.id, agent: null, text: null}
     else ($hit.agent // $hit.role) as $who
-      | (if $hit.role then "ask-agent-ts -r \($hit.role)" else "ask-agent -a \($hit.agent)" end) as $call
+      | (if $hit.role then "ask-agent -r \($hit.role)" else "ask-agent -a \($hit.agent)" end) as $call
       | {rule: $hit.id, agent: $hit.agent, role: $hit.role,
          text: ($r.directive | gsub("\\{rule\\}"; $hit.id) | gsub("\\{call\\}"; $call) | gsub("\\{agent\\}"; $who)
                 | gsub("\\{verify\\}"; $hit.verify // ""))}

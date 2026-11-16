@@ -13,7 +13,7 @@ Trust the receipt: check one thing (the file exists, or one command) and never r
 
 ## Pick the role
 
-Roles in `agents.json` name who does what, in order, with model and effort. When a role fits the task, call by role: `ask-agent-ts roles` lists them with readiness, and `ask-agent-ts -r ROLE -C "$PWD" "<prompt>"` runs the first ready agent of the role and falls through to the next on quota, timeout or failure. The `-r` call form uses `ask-agent-ts` until `ask-agent` on PATH points at the TypeScript router.
+Roles in `agents.json` name who does what, in order, with model and effort. When a role fits the task, call by role: `ask-agent roles` lists them with readiness, and `ask-agent -r ROLE -C "$PWD" "<prompt>"` runs the first ready agent of the role and falls through to the next on quota, timeout or failure.
 
 ## Pick the tier
 

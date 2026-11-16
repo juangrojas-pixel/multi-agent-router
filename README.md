@@ -29,11 +29,11 @@ ask-agent parallel -t think "question"   # every ready agent, one section each
 ask-agent reset [agent]                  # clear cooldowns
 ask-agent --backend hc -a codex "question"   # run the agent in a live hc terminal
 ask-agent runs [N] [-a agent]            # run history, last N (default 20)
-bin/ask-agent-ts -r coder "task"         # run as a role (TypeScript router only)
-bin/ask-agent-ts roles                   # what each role resolves to, and readiness
+ask-agent -r coder "task"                # run as a role
+ask-agent roles                          # what each role resolves to, and readiness
 ```
 
-`bin/ask-agent-ts` runs every command above itself, with the same output as the bash router `bin/ask-agent` (kept as the fallback). The differences: it prints cooldown times (`cooldown until HH:MM`, `cooled down until YYYY-MM-DD HH:MM`) where the bash router's `date -r` prints nothing under GNU date, and `runs 0` exits 0.
+`ask-agent` on PATH (`~/.local/bin/ask-agent`) points at `bin/ask-agent-ts`, the TypeScript router, which runs every command above itself with the same output as the bash router `bin/ask-agent`. The bash router stays in the repository as the fallback: to go back, point the link at `bin/ask-agent` (`ln -sfn "$PWD/bin/ask-agent" ~/.local/bin/ask-agent`). The differences: it prints cooldown times (`cooldown until HH:MM`, `cooled down until YYYY-MM-DD HH:MM`) where the bash router's `date -r` prints nothing under GNU date, and `runs 0` exits 0.
 
 ### Roles
 
@@ -69,14 +69,14 @@ The TypeScript router checks the whole config before any command and stops with 
 
 `orchestrator` in `agents.json` (`{ "agent": "claude" }`) says which agent orchestrates. It is informational: `roles` lists it first and nothing routes by it. The orchestrator agent must exist in `agents`; the example `claude` entry is disabled so no tier or role picks it as a delegate.
 
-`ask-agent-ts guidance` prints the routing guidance for whichever agent orchestrates: one line per role with its description and the call to make, then `routing.notes`. It names no orchestrating product. The call form is `ask-agent-ts -r ROLE` until `ask-agent` on PATH points at the TypeScript router (phase 8).
+`ask-agent guidance` prints the routing guidance for whichever agent orchestrates: one line per role with its description and the call to make, then `routing.notes`. It names no orchestrating product. The call form is `ask-agent -r ROLE`.
 
 Two adapters deliver that same text and hold no rule, role or agent name of their own. Both call `bin/ask-agent-ts` by path and fall back to `routing.general` when it fails or prints nothing:
 
 - Claude Code: `hooks/register.ts` adds it to the system prompt with the agent readiness line, and `bin/route-hint` injects it for prompts that match no rule.
 - gentle-shell: `adapters/gentle-shell/orchestrate [ARGS]` starts `gentle-shell -- --append-system-prompt "<guidance>" ARGS`.
 
-A `routing.rules` entry names an `agent` (directive `ask-agent -a AGENT`) or a `role` (directive `ask-agent-ts -r ROLE`); the directive template takes `{call}` for that command, plus `{rule}`, `{agent}` (the agent or role name) and `{verify}`. A role rule skips delegation only when every agent of the role is in cooldown.
+A `routing.rules` entry names an `agent` (directive `ask-agent -a AGENT`) or a `role` (directive `ask-agent -r ROLE`); the directive template takes `{call}` for that command, plus `{rule}`, `{agent}` (the agent or role name) and `{verify}`. A role rule skips delegation only when every agent of the role is in cooldown.
 
 ### Private policy file
 

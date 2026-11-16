@@ -96,11 +96,11 @@ before its implementation. Tests go through the CLI and use stub agents from
 
 ## Phase 8: Port the remaining commands and finish
 
-- [ ] T032 Port `status`, `reset` and `runs` to `src/cli.ts` and `src/state.ts`, removing their hand-off; parity suite stays green
-- [ ] T033 Port `parallel` to `src/run.ts` and `src/cli.ts` (every ready agent at once, `### agent` blocks on stdout, each agent's stderr replayed); parity suite stays green
-- [ ] T034 Port `--backend hc` to `src/run.ts` with the precedence flag, `agents.<id>.backend`, `backend`, `subprocess`, and the fall back to subprocess when `hc` cannot start; the 11 hc checks of the parity suite stay green
-- [ ] T035 Run every step of `specs/001-role-based-routing/quickstart.md` sections 1 to 3 and record the results, including two timings: router overhead before the agent starts (target under 300 ms) and the `roles` listing (target under 10 s)
-- [ ] T036 Update `skills/delegate/SKILL.md` and `agents/*.md` to call by role where a role exists
+- [x] T032 Port `status`, `reset` and `runs` to `src/cli.ts` and `src/state.ts`, removing their hand-off; parity suite stays green
+- [x] T033 Port `parallel` to `src/run.ts` and `src/cli.ts` (every ready agent at once, `### agent` blocks on stdout, each agent's stderr replayed); parity suite stays green
+- [x] T034 Port `--backend hc` to `src/run.ts` with the precedence flag, `agents.<id>.backend`, `backend`, `subprocess`, and the fall back to subprocess when `hc` cannot start; the 11 hc checks of the parity suite stay green
+- [x] T035 Run every step of `specs/001-role-based-routing/quickstart.md` sections 1 to 3 and record the results, including two timings: router overhead before the agent starts (target under 300 ms) and the `roles` listing (target under 10 s)
+- [x] T036 Update `skills/delegate/SKILL.md` and `agents/*.md` to call by role where a role exists
 - [ ] T037 Quickstart section 4 on the user's machine, then move `~/.local/bin/ask-agent` to `bin/ask-agent-ts` only on the user's explicit go-ahead; `bin/ask-agent` stays in the repository
 - [ ] T038 Create the user's real `policy.json` outside the repository with the client-specific `prompt_preamble` texts and routing prose copied verbatim from `agents.json`, and confirm with `ask-agent-ts` and a `stub-argv` copy of the config that each agent receives the same preamble as before
 - [ ] T039 [US5] Only after T037 and T038: replace the client-specific text in `agents.json` with generic versions. From this point the bash fallback runs with generic preambles; state that in `README.md`

@@ -1,4 +1,5 @@
 import type { Config } from "./config.ts";
+import { available, runAgent } from "./run.ts";
 
 export type RoleEntry = { agent: string; model: string; effort: string };
 
@@ -21,4 +22,24 @@ export function resolveRole(config: Config, name: string): RoleEntry[] {
     });
   }
   return entries;
+}
+
+// Runs a role's entries in order: skips unavailable ones, falls through on any failure,
+// and names each step on stderr. Per-agent `fallback` lists are not used here.
+export async function runRole(config: Config, name: string, entries: RoleEntry[], prompt: string): Promise<boolean> {
+  const log = (message: string) => process.stderr.write(`[ask-agent] role ${name}: ${message}\n`);
+  for (const [index, entry] of entries.entries()) {
+    let reason = available(entry.agent, config);
+    if (reason?.startsWith("command not found")) reason = "not installed";
+    if (!reason) {
+      process.stderr.write(`[ask-agent] using ${entry.agent}\n`);
+      const result = await runAgent(entry.agent, config, prompt, entry.model, "", entry.effort, name);
+      if (result.ok) return true;
+      reason = result.reason;
+    }
+    const next = entries[index + 1];
+    log(next ? `${entry.agent} failed (${reason}), trying ${next.agent}` : `${entry.agent} failed (${reason})`);
+  }
+  log("no agent could run");
+  return false;
 }

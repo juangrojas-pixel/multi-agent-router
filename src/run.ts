@@ -101,6 +101,9 @@ function runProcess(command: string, args: string[], timeoutSeconds: number): Pr
   });
 }
 
+// `reason` is the short cause shown in role fallback lines: quota, timeout, empty answer or exit N.
+export type RunResult = { ok: boolean; quota: boolean; reason: string; stderr: string };
+
 export async function runAgent(
   id: string,
   config: Config,
@@ -109,7 +112,7 @@ export async function runAgent(
   tier: string,
   effort = "",
   role = "",
-): Promise<{ ok: boolean; quota: boolean; stderr: string }> {
+): Promise<RunResult> {
   const agent = config.agents[id];
   const model = requestedModel || agent.model || "";
   const preamble = agent.prompt_preamble ?? config.prompt_preamble ?? "";
@@ -140,9 +143,10 @@ export async function runAgent(
 
   if (result.status === 0 && answer.trim()) {
     process.stdout.write(answer.endsWith("\n") ? answer : `${answer}\n`);
-    return { ok: true, quota: false, stderr: "" };
+    return { ok: true, quota: false, reason: "", stderr: "" };
   }
-  if (result.timedOut) return { ok: false, quota: false, stderr: `${id} timed out after ${timeoutSeconds}s` };
-  if (quota) return { ok: false, quota: true, stderr: `${id} hit a quota/rate limit: ${output.trim()}` };
-  return { ok: false, quota: false, stderr: `${id} failed (exit ${result.status}): ${output.trim()}` };
+  if (result.timedOut) return { ok: false, quota: false, reason: "timeout", stderr: `${id} timed out after ${timeoutSeconds}s` };
+  if (quota) return { ok: false, quota: true, reason: "quota", stderr: `${id} hit a quota/rate limit: ${output.trim()}` };
+  const reason = result.status === 0 ? "empty answer" : `exit ${result.status}`;
+  return { ok: false, quota: false, reason, stderr: `${id} failed (exit ${result.status}): ${output.trim()}` };
 }

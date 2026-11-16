@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadConfig, type Config } from "./config.ts";
-import { resolveRole, type RoleEntry } from "./roles.ts";
+import { resolveRole, runRole, type RoleEntry } from "./roles.ts";
 import { available, runAgent } from "./run.ts";
 
 const original = process.argv.slice(2);
@@ -104,10 +104,10 @@ if (!prompt) {
 }
 if (!prompt.trim()) fail("error: empty prompt");
 
+if (role) process.exit((await runRole(config, role, roleEntries, prompt)) ? 0 : 2);
+
 let candidates: string[];
-if (role) {
-  candidates = roleEntries.map((entry) => entry.agent);
-} else if (agents) {
+if (agents) {
   const named = agents.split(",");
   for (const id of named) if (!config.agents[id]) fail(`error: unknown agent: ${id}`);
   candidates = [];
@@ -130,10 +130,7 @@ for (const id of candidates) {
     continue;
   }
   log(`using ${id}`);
-  const entry = roleEntries.find((item) => item.agent === id);
-  const result = entry
-    ? await runAgent(id, config, prompt, entry.model, tier, entry.effort, role)
-    : await runAgent(id, config, prompt, model, tier);
+  const result = await runAgent(id, config, prompt, model, tier);
   if (result.ok) process.exit(0);
   log(result.stderr);
 }

@@ -48,8 +48,8 @@ before its implementation. Tests go through the CLI and use stub agents from
 
 **Independent test**: a role with `stub-quota` then `stub-ok`; the answer comes from the second.
 
-- [ ] T016 [US2] Write failing tests in `tests/role-fallback.test.ts` for spec Story 2 scenarios 1 to 4: first agent in cooldown is skipped; a quota error mid-run sets cooldown and retries on the next; `stub-fail` and `stub-slow` fall through; every entry unavailable exits 2 with one reason line per entry and `role NAME: no agent could run`; `runs.jsonl` has one line per attempt with `role`, `agent` and `exit`; each step prints `role NAME: AGENT failed (REASON), trying NEXT` on stderr; a per-agent `fallback` list is not used for role runs
-- [ ] T017 [US2] Extend `src/roles.ts` and `src/run.ts` so role runs skip entries that are disabled, not installed or in cooldown (recording the reason), fall through on quota, timeout, failure or empty answer, and emit the stderr lines above
+- [x] T016 [US2] Write failing tests in `tests/role-fallback.test.ts` for spec Story 2 scenarios 1 to 4: first agent in cooldown is skipped; a quota error mid-run sets cooldown and retries on the next; `stub-fail` and `stub-slow` fall through; every entry unavailable exits 2 with one reason line per entry and `role NAME: no agent could run`; `runs.jsonl` has one line per attempt with `role`, `agent` and `exit`; each step prints `role NAME: AGENT failed (REASON), trying NEXT` on stderr; a per-agent `fallback` list is not used for role runs
+- [x] T017 [US2] Extend `src/roles.ts` and `src/run.ts` so role runs skip entries that are disabled, not installed or in cooldown (recording the reason), fall through on quota, timeout, failure or empty answer, and emit the stderr lines above
 
 **Checkpoint**: roles survive an exhausted agent.
 

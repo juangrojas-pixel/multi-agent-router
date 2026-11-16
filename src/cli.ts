@@ -1,28 +1,28 @@
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { loadConfig, loadPolicy, mergeConfig, validateConfig, type Config } from "./config.ts";
+import { readFileSync, statSync } from "node:fs";
+import { configPath, loadConfig, loadPolicy, mergeConfig, validateConfig, type Config } from "./config.ts";
 import { guidance } from "./guidance.ts";
 import { listRoles, resolveRole, runRole, type RoleEntry } from "./roles.ts";
-import { available, runAgent } from "./run.ts";
+import { agyUsage, attempt, available, commandExists, runParallel, setBackendFlag } from "./run.ts";
+import { clearCooldown, jqText, runsFile, runsTable } from "./state.ts";
 
 const original = process.argv.slice(2);
-const bashRouter = fileURLToPath(new URL("../bin/ask-agent", import.meta.url));
+const NESTED = "error: nested call refused: ask-agent is already running an agent";
 
 function log(message: string): void { process.stderr.write(`[ask-agent] ${message}\n`); }
 function fail(message: string): never { log(message); process.exit(2); }
-function handoff(): never {
-  const result = spawnSync(bashRouter, original, { stdio: "inherit" });
-  process.exit(result.status ?? 2);
-}
 
-const handedOff = ["parallel", "status", "reset", "runs"].includes(original[0] ?? "");
+// Commands the bash router owned before the port keep its checks and messages on a missing config.
+const bashCommands = ["parallel", "status", "reset", "runs"].includes(original[0] ?? "");
 let config: Config;
 try {
   config = loadConfig();
 } catch (error) {
-  // An unreadable config keeps the bash router's own message for the commands it still owns.
-  if (handedOff) handoff();
+  if (bashCommands) {
+    if (process.env.ASK_AGENT_DEPTH) fail(NESTED);
+    let isFile = false;
+    try { isFile = statSync(configPath()).isFile(); } catch {}
+    if (!isFile) fail(`error: config not found: ${configPath()}`);
+  }
   fail(`config: ${(error as Error).message}`);
 }
 const mistake = validateConfig(config);
@@ -45,22 +45,65 @@ if (original[0] === "guidance") {
   process.stdout.write(guidance(config));
   process.exit(0);
 }
-if (handedOff) handoff();
-if (original.some((value, index) => value === "--backend" && original[index + 1] === "hc")) handoff();
-if (process.env.ASK_AGENT_DEPTH) fail("error: nested call refused: ask-agent is already running an agent");
+if (process.env.ASK_AGENT_DEPTH) fail(NESTED);
 
-function selectedAgents(args: string[], value: Config): string[] {
-  const roleIndex = args.findIndex((arg) => arg === "-r" || arg === "--role");
-  if (roleIndex >= 0) return (value.roles?.[args[roleIndex + 1] ?? ""]?.agents ?? []).map((item) => (typeof item === "string" ? item : item.agent));
-  const agentIndex = args.findIndex((arg) => arg === "-a" || arg === "--agent");
-  if (agentIndex >= 0) return (args[agentIndex + 1] ?? "").split(",").filter(Boolean);
-  const tierIndex = args.findIndex((arg) => arg === "-t" || arg === "--tier");
-  const tier = tierIndex >= 0 ? args[tierIndex + 1] : value.default_tier || "execute";
-  return value.tiers?.[tier ?? ""] ?? [];
+// Readiness of every agent, its tiers, then agy's quota buckets. Exits as the bash router's
+// pipeline does: agy's exit status when the usage call fails, 5 when its report is not JSON.
+function status(): number {
+  for (const id of Object.keys(config.agents)) {
+    const tiers = Object.entries(config.tiers ?? {}).filter(([, list]) => list.includes(id)).map(([name]) => name);
+    const label = `[${tiers.length ? tiers.join(",") : "explicit only"}]`;
+    const reason = available(id, config);
+    process.stdout.write(`${id.padEnd(13)} ${label.padEnd(24)} ${reason ? `skip: ${reason}` : "ready"}\n`);
+  }
+  const agy = config.agents.agy;
+  if (agy?.enabled !== true || !commandExists(agy.command)) return 0;
+  process.stdout.write("\nagy quota:\n");
+  const usage = agyUsage(agy.command);
+  if (usage.status !== 0) return usage.status;
+  if (!usage.stdout.trim()) return 0;
+  let groups: unknown;
+  try { groups = JSON.parse(usage.stdout)?.command?.data?.groups; } catch { return 5; }
+  if (!Array.isArray(groups)) return 5;
+  for (const group of groups) {
+    if (!Array.isArray(group?.buckets)) return 5;
+    for (const bucket of group.buckets) {
+      if (typeof bucket?.remaining_fraction !== "number") return 5;
+      const percent = Math.floor(bucket.remaining_fraction * 100);
+      process.stdout.write(`  ${jqText(group.name)} / ${jqText(bucket.window)}: ${percent}% (reset ${jqText(bucket.reset_time)})\n`);
+    }
+  }
+  return 0;
 }
 
-const explicitSubprocess = original.some((value, index) => value === "--backend" && original[index + 1] === "subprocess");
-if (!explicitSubprocess && (config.backend === "hc" || selectedAgents(original, config).some((id) => config.agents[id]?.backend === "hc"))) handoff();
+if (original[0] === "status") process.exit(status());
+if (original[0] === "reset") {
+  const agent = original[1] ?? "";
+  if (!clearCooldown(agent)) log("cooldown lock busy, skipping write");
+  log(`cooldown cleared ${agent || "for all agents"}`);
+  process.exit(0);
+}
+if (original[0] === "runs") {
+  const usage = "error: usage: ask-agent runs [N] [-a AGENT]";
+  let limit = 20;
+  let agent = "";
+  for (let index = 1; index < original.length; index += 1) {
+    const argument = original[index];
+    if (argument === "-a" || argument === "--agent") {
+      agent = original[index + 1] ?? "";
+      if (!agent) fail(usage);
+      index += 1;
+    } else if (/^[0-9]+$/.test(argument)) limit = Number(argument);
+    else fail(usage);
+  }
+  const table = runsTable(limit, agent);
+  if (table === null) log(`no runs recorded yet (${runsFile()})`);
+  else process.stdout.write(table);
+  process.exit(0);
+}
+
+const parallel = original[0] === "parallel";
+const args = parallel ? original.slice(1) : original;
 
 let tier = "";
 let agents = "";
@@ -70,25 +113,26 @@ let prompt = "";
 let dir = "";
 
 function optionValue(index: number): string {
-  const value = original[index + 1];
-  if (!value) fail(`error: unknown option: ${original[index]}`);
+  const value = args[index + 1];
+  if (!value) fail(`error: unknown option: ${args[index]}`);
   return value;
 }
 
-for (let index = 0; index < original.length; index += 1) {
-  const argument = original[index];
+for (let index = 0; index < args.length; index += 1) {
+  const argument = args[index];
   if (argument === "--") {
-    prompt = original.slice(index + 1).join(" ");
+    prompt = args.slice(index + 1).join(" ");
     break;
   }
   if (argument === "-t" || argument === "--tier") tier = optionValue(index++);
   else if (argument === "-a" || argument === "--agent") agents = optionValue(index++);
-  else if (argument === "-r" || argument === "--role") role = optionValue(index++);
+  else if (!parallel && (argument === "-r" || argument === "--role")) role = optionValue(index++);
   else if (argument === "-m" || argument === "--model") model = optionValue(index++);
   else if (argument === "-C" || argument === "--cwd") dir = optionValue(index++);
   else if (argument === "--backend") {
-    const backend = optionValue(index++);
-    if (backend !== "subprocess") fail(`error: unknown backend: ${backend} (use hc or subprocess)`);
+    const backend = args[++index] ?? "";
+    if (backend !== "hc" && backend !== "subprocess") fail(`error: unknown backend: ${backend} (use hc or subprocess)`);
+    setBackendFlag(backend);
   } else if (argument === "-h" || argument === "--help") {
     process.stdout.write([
       "ask-agent: route a prompt to external agent CLIs (codex/pi, agy, opencode,",
@@ -114,7 +158,7 @@ for (let index = 0; index < original.length; index += 1) {
     process.exit(0);
   } else if (argument.startsWith("-")) fail(`error: unknown option: ${argument}`);
   else {
-    prompt = original.slice(index).join(" ");
+    prompt = args.slice(index).join(" ");
     break;
   }
 }
@@ -122,24 +166,32 @@ for (let index = 0; index < original.length; index += 1) {
 if (role && (tier || agents)) fail("use only one of -r, -a, -t");
 if (role && model) fail("use -r without -m: the model comes from the role");
 if (tier && agents) fail("error: use either -t or -a, not both");
+// parallel checks in the bash router's order: agents and tier before the prompt, the directory last.
+if (parallel) {
+  for (const id of agents.split(",").filter(Boolean)) if (!config.agents[id]) fail(`error: unknown agent: ${id}`);
+  if (tier && !config.tiers?.[tier]) fail(`error: unknown tier: ${tier}`);
+}
 let roleEntries: RoleEntry[] = [];
 if (role) {
   try { roleEntries = resolveRole(config, role); } catch (error) { fail((error as Error).message); }
 }
-if (dir) {
+function changeDir(): void {
+  if (!dir) return;
   try { process.chdir(dir); } catch { fail(`error: cannot cd to ${dir}`); }
 }
+if (!parallel) changeDir();
 if (!prompt) {
   if (process.stdin.isTTY) fail("error: no prompt given");
   prompt = readFileSync(0, "utf8");
 }
 if (!prompt.trim()) fail("error: empty prompt");
+if (parallel) changeDir();
 
 if (role) process.exit((await runRole(config, role, roleEntries, prompt)) ? 0 : 2);
 
 let candidates: string[];
 if (agents) {
-  const named = agents.split(",");
+  const named = parallel ? agents.split(",").filter(Boolean) : agents.split(",");
   for (const id of named) if (!config.agents[id]) fail(`error: unknown agent: ${id}`);
   candidates = [];
   for (const id of named) {
@@ -154,15 +206,24 @@ if (agents) {
 }
 
 if (candidates.length === 0) process.exit(2);
+if (parallel) {
+  const ready = candidates.filter((id) => {
+    const reason = available(id, config);
+    if (reason) log(`skip ${id}: ${reason}`);
+    return !reason;
+  });
+  if (ready.length === 0) fail(`error: no agent ready (checked: ${candidates.join(" ")})`);
+  if (!(await runParallel(ready, config, prompt, model, tier))) fail("error: no agent could answer");
+  process.exit(0);
+}
 for (const id of candidates) {
   const reason = available(id, config);
   if (reason) {
     log(`skip ${id}: ${reason}`);
     continue;
   }
-  log(`using ${id}`);
-  const result = await runAgent(id, config, prompt, model, tier);
-  if (result.ok) process.exit(0);
-  log(result.stderr);
+  const answered = await attempt(id, config, prompt, model, tier,
+    (text) => { process.stdout.write(text); }, (text) => { process.stderr.write(text); });
+  if (answered) process.exit(0);
 }
 fail(`error: no agent could answer (tried: ${candidates.join(" ")})`);

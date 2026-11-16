@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Answers with its last argument after one second.
+sleep 1
+printf '%s\n' "${@: -1}"

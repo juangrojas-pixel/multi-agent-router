@@ -2,18 +2,12 @@ import { spawn, spawnSync } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { buildAgent, commandArgs, parseOutput } from "./agents.ts";
 import type { Config } from "./config.ts";
+import { hcRun, type ProcessResult } from "./hc.ts";
 import { changedFiles, cooldown, gitSnapshot, record, setCooldown } from "./state.ts";
 
 const quotaPattern = /rate.?limit|quota|429|resource.?exhausted|usage limit|too many requests|limit reached/i;
 
-type ProcessResult = {
-  stdout: string;
-  stderr: string;
-  status: number;
-  timedOut: boolean;
-};
-
-function commandExists(command: string): boolean {
+export function commandExists(command: string): boolean {
   if (command.includes("/")) {
     try {
       accessSync(command, constants.X_OK);
@@ -49,20 +43,29 @@ export function available(id: string, config: Config): string | null {
 type UsageBucket = { remaining_fraction: number; reset_time: string };
 type UsageGroup = { name: string; buckets?: UsageBucket[] };
 
-// Asks agy for its usage (costs no tokens) and cools it down when the configured group is low.
-function agyQuotaReason(command: string, quota: { group: string; min_remaining: number }): string | null {
+// agy's usage report (costs no tokens): its exit status (142 on timeout) and stdout.
+export function agyUsage(command: string): { status: number; stdout: string } {
   const usage = spawnSync(command, ["-p", "/usage", "--output-format", "json", "--print-timeout", "30s"], {
     encoding: "utf8",
     timeout: 45_000,
     stdio: ["ignore", "pipe", "ignore"],
   });
+  return { status: usage.status ?? 142, stdout: usage.stdout ?? "" };
+}
+
+// Asks agy for its usage and cools it down when the configured group is low.
+function agyQuotaReason(command: string, quota: { group: string; min_remaining: number }): string | null {
+  const usage = agyUsage(command);
   if (usage.status !== 0) return "quota check failed";
+  // An empty report has no buckets, as jq reads it in the bash router.
+  if (!usage.stdout.trim()) return "quota group not found";
   let groups: UsageGroup[];
   try {
     groups = JSON.parse(usage.stdout).command.data.groups;
   } catch {
     return "quota check failed";
   }
+  if (!Array.isArray(groups)) return "quota check failed";
   const buckets = groups.filter((group) => group.name === quota.group).flatMap((group) => group.buckets ?? []);
   if (buckets.length === 0) return "quota group not found";
   const lowest = buckets.reduce((min, bucket) => (bucket.remaining_fraction < min.remaining_fraction ? bucket : min));
@@ -70,6 +73,13 @@ function agyQuotaReason(command: string, quota: { group: string; min_remaining: 
   setCooldown("agy", Math.floor(Date.parse(lowest.reset_time) / 1000));
   const percent = (fraction: number) => Math.floor(fraction * 100);
   return `quota low (${percent(lowest.remaining_fraction)}% < ${percent(quota.min_remaining)}%)`;
+}
+
+// Backend precedence: the --backend flag, then agents.<id>.backend, then backend, then subprocess.
+let backendFlag = "";
+export function setBackendFlag(value: string): void { backendFlag = value; }
+function backendFor(id: string, config: Config): string {
+  return backendFlag || (config.agents[id]?.backend ?? config.backend ?? "subprocess");
 }
 
 function runProcess(command: string, args: string[], timeoutSeconds: number): Promise<ProcessResult> {
@@ -110,9 +120,18 @@ function runProcess(command: string, args: string[], timeoutSeconds: number): Pr
 }
 
 // `reason` is the short cause shown in role fallback lines: quota, timeout, empty answer or exit N.
-export type RunResult = { ok: boolean; quota: boolean; reason: string; stderr: string };
+// `stderr` is the router's one-line message for -a/-t and parallel runs, worded as the bash router does.
+export type RunResult = { ok: boolean; quota: boolean; reason: string; stderr: string; until?: number };
 
-export async function runAgent(
+// The last `count` lines of a run's output joined by spaces, as `tail -n COUNT | tr '\n' ' '` gives them.
+function lastLines(output: string, count: number): string {
+  return output.split("\n").slice(-count).map((line) => `${line} `).join("");
+}
+
+function withNewline(answer: string): string { return answer.endsWith("\n") ? answer : `${answer}\n`; }
+
+// Runs one agent, records the run and sets its cooldown on a quota error; prints nothing.
+async function execute(
   id: string,
   config: Config,
   prompt: string,
@@ -120,7 +139,7 @@ export async function runAgent(
   tier: string,
   effort = "",
   role = "",
-): Promise<RunResult> {
+): Promise<{ result: RunResult; answer: string }> {
   const agent = config.agents[id];
   const model = requestedModel || agent.model || "";
   const preamble = agent.prompt_preamble ?? config.prompt_preamble ?? "";
@@ -129,9 +148,16 @@ export async function runAgent(
   const timeoutSeconds = agent.timeout_seconds ?? 600;
   const started = Date.now();
   const before = gitSnapshot();
-  const result = await runProcess(agent.command, commandArgs(id, agent, task, model, effort), timeoutSeconds);
+  const args = commandArgs(id, agent, task, model, effort);
+  const subprocess = () => runProcess(agent.command, args, timeoutSeconds);
+  const hc = (config as Config & { hc_command?: string }).hc_command || "hc";
+  const result = backendFor(id, config) === "hc"
+    ? await hcRun(hc, id, agent.command, args, timeoutSeconds, subprocess)
+    : await subprocess();
   const seconds = Math.floor((Date.now() - started) / 1000);
   const output = `${result.stdout}${result.stderr}`;
+  // The bash router's view of the output: stdout, a newline, stderr, trailing newlines dropped.
+  const combined = `${result.stdout.replace(/\n+$/, "")}\n${result.stderr.replace(/\n+$/, "")}`;
   const answer = parseOutput(built.output, result.stdout);
   const quota = quotaPattern.test(output);
 
@@ -147,14 +173,85 @@ export async function runAgent(
     changedFiles(before, gitSnapshot()),
     role,
   );
-  if (quota) setCooldown(id, Math.floor(Date.now() / 1000) + (config.cooldown_seconds ?? 3600));
-
-  if (result.status === 0 && answer.trim()) {
-    process.stdout.write(answer.endsWith("\n") ? answer : `${answer}\n`);
-    return { ok: true, quota: false, reason: "", stderr: "" };
+  let until: number | undefined;
+  if (quota) {
+    until = Math.floor(Date.now() / 1000) + (config.cooldown_seconds ?? 3600);
+    setCooldown(id, until);
   }
-  if (result.timedOut) return { ok: false, quota: false, reason: "timeout", stderr: `${id} timed out after ${timeoutSeconds}s` };
-  if (quota) return { ok: false, quota: true, reason: "quota", stderr: `${id} hit a quota/rate limit: ${output.trim()}` };
+
+  if (result.status === 0 && answer.trim()) return { result: { ok: true, quota: false, reason: "", stderr: "" }, answer };
+  if (result.timedOut) {
+    return { result: { ok: false, quota: false, reason: "timeout", stderr: `${id} timed out after ${timeoutSeconds}s` }, answer };
+  }
+  if (quota) {
+    return { result: { ok: false, quota: true, reason: "quota", stderr: `${id} hit a quota/rate limit: ${lastLines(combined, 3)}`, until }, answer };
+  }
   const reason = result.status === 0 ? "empty answer" : `exit ${result.status}`;
-  return { ok: false, quota: false, reason, stderr: `${id} failed (exit ${result.status}): ${output.trim()}` };
+  return { result: { ok: false, quota: false, reason, stderr: `${id} failed (exit ${result.status}): ${lastLines(combined, 5)}` }, answer };
+}
+
+// Runs one agent and prints its answer on stdout when it succeeds.
+export async function runAgent(
+  id: string,
+  config: Config,
+  prompt: string,
+  requestedModel: string,
+  tier: string,
+  effort = "",
+  role = "",
+): Promise<RunResult> {
+  const { result, answer } = await execute(id, config, prompt, requestedModel, tier, effort, role);
+  if (result.ok) process.stdout.write(withNewline(answer));
+  return result;
+}
+
+function localStamp(seconds: number): string {
+  const date = new Date(seconds * 1000);
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
+// One -a/-t or parallel attempt, as the bash router's `attempt`: "using AGENT", the run, its
+// failure message, and the end of the cooldown a quota error set. `out` gets the answer.
+export async function attempt(
+  id: string,
+  config: Config,
+  prompt: string,
+  model: string,
+  tier: string,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<boolean> {
+  err(`[ask-agent] using ${id}\n`);
+  const { result, answer } = await execute(id, config, prompt, model, tier);
+  if (result.ok) {
+    out(withNewline(answer));
+    return true;
+  }
+  err(`[ask-agent] ${result.stderr}\n`);
+  if (result.until !== undefined) err(`[ask-agent] ${id} cooled down until ${localStamp(result.until)}\n`);
+  return false;
+}
+
+// Runs every ready agent at once. Prints one `### agent` block per agent, in order, with its
+// answer or `_(no answer: ...)_`, and replays each agent's stderr after its block.
+export async function runParallel(ids: string[], config: Config, prompt: string, model: string, tier: string): Promise<boolean> {
+  const results = await Promise.all(ids.map(async (id) => {
+    let out = "";
+    let err = "";
+    const ok = await attempt(id, config, prompt, model, tier, (text) => { out += text; }, (text) => { err += text; });
+    return { id, ok, out, err };
+  }));
+  let answered = false;
+  for (const { id, ok, out, err } of results) {
+    if (ok) {
+      answered = true;
+      process.stdout.write(`### ${id}\n\n${out}\n`);
+    } else {
+      const last = err.replace(/\n$/, "").split("\n").at(-1) ?? "";
+      process.stdout.write(`### ${id}\n\n_(no answer: ${last.replace(/^\[ask-agent\] /, "")})_\n\n`);
+    }
+    process.stderr.write(err);
+  }
+  return answered;
 }

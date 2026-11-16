@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -42,4 +42,15 @@ export function baseConfig(agentCommand = fixture("stub-ok")): object {
       two: { enabled: true, command: agentCommand, timeout_seconds: 1, extra_args: [], args: ["{prompt}"], output: "text" },
     },
   };
+}
+
+// A PATH with only what bin/ask-agent-ts itself needs: no jq and no perl, so the bash router cannot run.
+export function pathWithoutJq(): string {
+  const dir = mkdtempSync(join(tmpdir(), "ask-agent-path-"));
+  for (const tool of ["bash", "sh", "dirname", "readlink", "cat", "sleep"]) {
+    const found = spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim();
+    symlinkSync(found, join(dir, tool));
+  }
+  symlinkSync(process.execPath, join(dir, "node"));
+  return dir;
 }

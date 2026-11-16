@@ -33,6 +33,8 @@ bin/ask-agent-ts -r coder "task"         # run as a role (TypeScript router only
 bin/ask-agent-ts roles                   # what each role resolves to, and readiness
 ```
 
+`bin/ask-agent-ts` runs every command above itself, with the same output as the bash router `bin/ask-agent` (kept as the fallback). The differences: it prints cooldown times (`cooldown until HH:MM`, `cooled down until YYYY-MM-DD HH:MM`) where the bash router's `date -r` prints nothing under GNU date, and `runs 0` exits 0.
+
 ### Roles
 
 `roles` in `agents.json` names who does what. Each role has a `description`, an ordered `agents` list and optional `model` and `effort` defaults. An entry is an agent id or `{ "agent", "model", "effort" }`; the entry's own value wins over the role default, which wins over the agent's `model`. The effort reaches the agent through its `effort_args` (for example `["--thinking", "{effort}"]`), and a role may set it only on an agent that declares `effort_levels`.
@@ -92,7 +94,7 @@ Every agent run, successful or not, appends one JSON line to `~/.cache/multi-age
 
 `--backend hc` runs each agent inside a live [hc](https://herdr.dev) terminal instead of a plain subprocess. While it works, `hc attach aa-<agent>-<pid>` (printed on stderr) shows the agent live; `ctrl+\` detaches. The answer, stderr, exit code, quota detection and per-agent timeout behave exactly like the subprocess backend, and the terminal is removed when the run ends.
 
-- Selection: `--backend hc|subprocess` flag, then `agents.<name>.backend`, then the global `backend` in `agents.json`, then `subprocess`.
+- Selection: `--backend hc|subprocess` flag, then `agents.<name>.backend`, then the global `backend` in `agents.json`, then `subprocess`. It applies to `-a`, `-t`, `-r` and `parallel` runs alike.
 - `hc_command` in `agents.json` sets the hc binary (default `hc`).
 - When hc cannot start the terminal, the run falls back to the subprocess backend and logs `falling back to subprocess`.
 - Terminals start with `--no-parent --no-notify`, so hc never types notes into the caller's terminal.

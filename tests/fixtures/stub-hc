@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Stand-in for hc (herdr-core): run, wait, get, kill and rm, enough for the router's hc backend.
+# Logs every subcommand to $STUB_HC_LOG; keeps the started run in $STUB_HC_STATE.
+# STUB_HC_FAIL=TEXT makes `run` fail with TEXT on stderr and no address.
+state="${STUB_HC_STATE:?STUB_HC_STATE is required}"
+printf '%s\n' "$1" >>"${STUB_HC_LOG:-/dev/null}"
+case "$1" in
+  run)
+    if [[ -n "${STUB_HC_FAIL:-}" ]]; then echo "$STUB_HC_FAIL" >&2; exit 1; fi
+    while [[ "$1" != -- ]]; do shift; done
+    shift
+    # "$@" is now: bash RUN_SCRIPT DIR COMMAND ARGS...
+    printf '%s\n' "$3" >"$state/dir"
+    setsid "$@" >/dev/null 2>&1 </dev/null &
+    printf '%s\n' "$!" >"$state/pid"
+    echo '{"address":"t1"}'
+    ;;
+  wait) # wait ADDRESS --json --timeout SECONDS
+    dir="$(<"$state/dir")"
+    for ((i = 0; i < ${5:-1} * 10; i++)); do
+      [[ -s "$dir/rc" ]] && break
+      sleep 0.1
+    done
+    ;;
+  get)
+    if kill -0 "$(<"$state/pid")" 2>/dev/null; then echo '{"state":"live"}'; else echo '{"state":"finished"}'; fi
+    ;;
+  kill) kill -- "-$(<"$state/pid")" 2>/dev/null ;;
+  rm) ;;
+esac

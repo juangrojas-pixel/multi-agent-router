@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Fails with exit 3 after two lines on stdout and two on stderr.
+echo out1
+echo out2
+echo err1 >&2
+echo err2 >&2
+exit 3

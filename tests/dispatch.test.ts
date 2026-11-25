@@ -425,3 +425,21 @@ test("dispatch validates model against config models when no catalog exists and 
   assert.equal(okRes.status, 0, okRes.stderr);
   assert.equal(okRes.stdout, "### t1 (alpha/m-good)\n\nFROM_STDIN\n\n");
 });
+
+test("a client task with fallback: true is rejected when any fallback agent is outside client_agents (FR-018)", (t) => {
+  const s = setup(t, {}, { policy: { client_agents: ["flaky"] } });
+  const marker = join(s.root, "marker.log");
+  const env = { ...s.env, STUB_MARKER: marker };
+  const withFallback = writeBatch(s.root, {
+    tasks: [{ id: "t1", agent: "flaky", cwd: s.root, prompt: "NO", client: true, fallback: true }],
+  }, "client-fallback.json");
+  const res = runCli(["dispatch", "-f", withFallback], env);
+  assert.equal(res.status, 2);
+  assert.equal(res.stdout, "");
+  assert.match(res.stderr, /tasks\[0\]\.client: fallback agent backup is not allowed for client work \(policy client_agents\)/);
+  assert.equal(existsSync(marker), false);
+  const withoutFallback = writeBatch(s.root, {
+    tasks: [{ id: "t1", agent: "flaky", cwd: s.root, prompt: "NO", client: true }],
+  }, "client-no-fallback.json");
+  assert.notEqual(runCli(["dispatch", "-f", withoutFallback], env).status, 2);
+});

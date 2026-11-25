@@ -134,6 +134,13 @@ function validateBatch(
       if (item.client === true && !clientAgents.has(agent)) {
         return { ok: false, error: `${prefix}.client: agent ${agent} is not allowed for client work (policy client_agents)` };
       }
+      // With fallback: true the task may end on a fallback agent, so each one must be allowed too.
+      if (item.client === true && item.fallback === true) {
+        const outside = (config.agents[agent].fallback ?? []).find((id) => !clientAgents.has(id));
+        if (outside) {
+          return { ok: false, error: `${prefix}.client: fallback agent ${outside} is not allowed for client work (policy client_agents)` };
+        }
+      }
     } else {
       const role = item.role as string;
       let entries;

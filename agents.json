@@ -221,7 +221,11 @@
         "agy",
         "--version"
       ],
-      "latest_cmd": null,
+      "latest_cmd": [
+        "sh",
+        "-c",
+        "curl -fsS --max-time 15 https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json | jq -r .version"
+      ],
       "update_cmd": "agy update",
       "model": "gemini-4-hydrogen-high",
       "timeout_seconds": 1800,

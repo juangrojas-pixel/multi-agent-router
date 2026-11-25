@@ -159,7 +159,7 @@ Role tasks fall back along their role order; agent tasks run only the named agen
 
 ### Preflight
 
-`ask-agent preflight [--json]` checks the installed and latest CLI versions for enabled agents, refreshes the model catalog, and reports model counts by status, the lowest known quota per agent, and benchmark cache freshness. Missing or failed version lookups show `unknown`; benchmark freshness is checked locally, with no benchmark download. Without benchmark configuration, it shows `not configured`.
+`ask-agent preflight [--json]` checks the installed and latest CLI versions for enabled agents, refreshes the model catalog, and reports model counts by status, the lowest known quota per agent, and benchmark cache freshness. Missing or failed version lookups show `unknown`; benchmark freshness is checked locally, with no benchmark download. Without benchmark configuration, it shows `not configured`. agy has no package registry, so its `latest_cmd` reads the version field of the manifest its own auto-updater uses (`https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json`).
 
 `ask-agent preflight --update` also updates: it runs `update_cmd` for each outdated agent, one at a time, prints that command's output on stderr, and then reports again. Agents that are current or whose latest version is `unknown` are not touched. Each update gets 10 minutes; on timeout its whole process group is killed and it is reported as timed out. A failed update makes preflight exit `3`. Run it on request, not on every start: an update can change an agent while it is working.
 

@@ -220,7 +220,7 @@ function runTask(task: DispatchTask, batchId: string, cliPath: string): Promise<
 
   const started = Date.now();
   return new Promise((resolveOutcome) => {
-    const child = spawn(process.execPath, childArgs, { env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [...process.execArgv, ...childArgs], { env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -234,6 +234,15 @@ function runTask(task: DispatchTask, batchId: string, cliPath: string): Promise<
       resolveOutcome({ task, stdout, stderr, exit, seconds });
     });
   });
+}
+
+function usedAgent(stderr: string, config: Config): string | null {
+  let agent: string | null = null;
+  for (const line of stderr.split("\n")) {
+    const match = /^\[ask-agent\] using (\S+)$/.exec(line);
+    if (match && Object.hasOwn(config.agents, match[1])) agent = match[1];
+  }
+  return agent;
 }
 
 // `ask-agent dispatch [-f FILE | -] [--json]` (specs/002-agentic-dispatcher/contracts/cli.md).
@@ -298,9 +307,9 @@ export async function dispatchCommand(config: Config, args: string[]): Promise<n
   await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker()));
 
   if (json) {
-    const receipts: DispatchReceipt[] = outcomes.map(({ task, stdout, exit, seconds }) => ({
+    const receipts: DispatchReceipt[] = outcomes.map(({ task, stdout, stderr, exit, seconds }) => ({
       task_id: task.id,
-      agent: task.agent ?? null,
+      agent: (exit === 0 ? usedAgent(stderr, config) : null) ?? task.agent ?? null,
       role: task.role ?? null,
       model: task.model ?? null,
       exit,
@@ -310,7 +319,7 @@ export async function dispatchCommand(config: Config, args: string[]): Promise<n
     process.stdout.write(`${JSON.stringify(receipts, null, 2)}\n`);
   } else {
     for (const { task, stdout, stderr, exit } of outcomes) {
-      const target = task.agent ?? task.role!;
+      const target = (exit === 0 ? usedAgent(stderr, config) : null) ?? task.agent ?? task.role!;
       const modelLabel = task.model || "default";
       if (exit === 0 && stdout.trim()) {
         const body = stdout.endsWith("\n") ? stdout : `${stdout}\n`;

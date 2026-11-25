@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Ignores SIGINT and SIGTERM, writes its PID, and sleeps until SIGKILL.
+trap '' INT TERM
+if [[ -n "${STUB_PID_FILE:-}" ]]; then
+  printf '%s\n' "$$" > "$STUB_PID_FILE"
+fi
+sleep 30

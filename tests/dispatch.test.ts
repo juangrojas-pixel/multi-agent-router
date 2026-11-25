@@ -317,7 +317,7 @@ test("dispatch supports role fallback and agent fallback: true vs default no fal
   }, "role.json");
   let res = runCli(["dispatch", "-f", roleFile], s.env);
   assert.equal(res.status, 0, res.stderr);
-  assert.equal(res.stdout, "### r1 (coder/default)\n\nROLE_OK\n\n");
+  assert.equal(res.stdout, "### r1 (backup/default)\n\nROLE_OK\n\n");
   assert.match(res.stderr, /role coder: flaky failed.*trying backup/);
 
   // Agent task WITHOUT fallback: true does NOT fall back
@@ -338,7 +338,7 @@ test("dispatch supports role fallback and agent fallback: true vs default no fal
   }, "fb.json");
   res = runCli(["dispatch", "-f", fbFile], s.env);
   assert.equal(res.status, 0, res.stderr);
-  assert.equal(res.stdout, "### a2 (flaky/default)\n\nWITH_FB\n\n");
+  assert.equal(res.stdout, "### a2 (backup/default)\n\nWITH_FB\n\n");
   const fbRuns = readRuns(s.root).filter((r) => r.batch_id === "b-fb");
   assert.deepEqual(fbRuns.map((r) => [r.agent, r.exit, r.task_id]), [
     ["flaky", 1, "a2"],
@@ -363,7 +363,7 @@ test("dispatch --json, stdin (-), and runs.jsonl record task_id, reason and shar
     receipts.map(({ task_id, agent, role, model, exit, answer }) => ({ task_id, agent, role, model, exit, answer })),
     [
       { task_id: "t-a", agent: "alpha", role: null, model: "m-good", exit: 0, answer: "ANS_A" },
-      { task_id: "t-b", agent: null, role: "coder", model: null, exit: 0, answer: "ANS_B" },
+      { task_id: "t-b", agent: "backup", role: "coder", model: null, exit: 0, answer: "ANS_B" },
       { task_id: "t-c", agent: "beta", role: null, model: null, exit: 2, answer: "" },
     ],
   );
@@ -442,4 +442,42 @@ test("a client task with fallback: true is rejected when any fallback agent is o
     tasks: [{ id: "t1", agent: "flaky", cwd: s.root, prompt: "NO", client: true }],
   }, "client-no-fallback.json");
   assert.notEqual(runCli(["dispatch", "-f", withoutFallback], env).status, 2);
+});
+
+test("dispatch forwards process.execArgv to child router processes", (t) => {
+  const s = setup(t);
+  const cliPath = resolve(import.meta.dirname, "..", "src", "cli.ts");
+  const marker = join(s.root, "execargv-marker.log");
+  const preload = join(s.root, "preload.mjs");
+  writeFileSync(
+    preload,
+    `import { appendFileSync } from "node:fs";\nif (process.env.ASK_AGENT_BATCH_ID === "b-execargv-test" && process.env.EXECARGV_MARKER) appendFileSync(process.env.EXECARGV_MARKER, "child\\n");\n`,
+  );
+  const file = writeBatch(s.root, {
+    batch_id: "b-execargv-test",
+    tasks: [{ id: "t1", agent: "alpha", cwd: s.root, prompt: "EXEC_OK" }],
+  });
+  const res = spawnSync(process.execPath, ["--import", preload, cliPath, "dispatch", "-f", file], {
+    encoding: "utf8",
+    env: { ...s.env, ASK_AGENT_BATCH_ID: "", EXECARGV_MARKER: marker },
+  });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(existsSync(marker), true, "child router process must inherit parent process.execArgv");
+  assert.equal(readFileSync(marker, "utf8"), "child\n");
+});
+
+test("dispatch receipts attribute the agent that actually answered after fallback", (t) => {
+  const s = setup(t);
+  const file = writeBatch(s.root, {
+    batch_id: "b-fb-receipt",
+    tasks: [{ id: "a2", agent: "flaky", cwd: s.root, prompt: "FALLBACK_ANSWER", fallback: true }],
+  });
+  const jsonRes = runCli(["dispatch", "-f", file, "--json"], s.env);
+  assert.equal(jsonRes.status, 0, jsonRes.stderr);
+  const receipts = JSON.parse(jsonRes.stdout) as Array<Record<string, unknown>>;
+  assert.equal(receipts[0].agent, "backup");
+
+  const textRes = runCli(["dispatch", "-f", file], s.env);
+  assert.equal(textRes.status, 0, textRes.stderr);
+  assert.equal(textRes.stdout, "### a2 (backup/default)\n\nFALLBACK_ANSWER\n\n");
 });

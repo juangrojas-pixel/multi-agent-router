@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { baseConfig, fixture, runCli, scratchConfig } from "./fixtures/helpers.ts";
 
 type AnyConfig = { agents: Record<string, Record<string, unknown>>; backend?: string; herdr_command?: string };
@@ -33,7 +34,7 @@ test("a run inside Herdr opens a labeled sibling pane, reports the agent and ret
   assert.match(result.stderr, /\[ask-agent\] running argv in herdr pane w1:p9\n/);
   const seen = calls(s.calls);
   const cwd = process.cwd();
-  assert.deepEqual(seen[0], ["pane", "split", "--current", "--direction", "right", "--cwd", s.root.length ? seen[0][6] : cwd, "--no-focus"]);
+  assert.deepEqual(seen[0], ["pane", "split", "--current", "--direction", "right", "--cwd", cwd, "--no-focus"]);
   assert.deepEqual(seen[1], ["pane", "rename", "w1:p9", "argv T9"]);
   assert.deepEqual(seen[2], ["pane", "report-agent", "w1:p9", "--source", "ask-agent", "--agent", "argv", "--state", "working", "--message", "m1 T9"]);
   assert.equal(seen[3][0] + seen[3][1] + seen[3][2], "panerunw1:p9");
@@ -83,4 +84,59 @@ test("--backend herdr is accepted on the command line", () => {
   const result = runCli(["--backend", "herdr", "-a", "argv", "hello"], s.env);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /running argv in herdr pane w1:p9/);
+});
+
+test("a failed herdr pane run stops immediately instead of waiting until timeout", (t) => {
+  const config = herdrConfig(fixture("stub-argv"), 5);
+  config.herdr_command = fixture("p11c-stub-herdr");
+  const s = setup(config, { HERDR_FAIL_RUN: "1" });
+  t.after(() => rmSync(s.root, { recursive: true, force: true }));
+  const started = Date.now();
+  const result = runCli(["-a", "argv", "hello"], s.env);
+  const elapsed = Date.now() - started;
+  assert.equal(result.status, 2);
+  assert.ok(elapsed < 3_000, `expected fast failure (< 3000ms), took ${elapsed}ms`);
+  assert.doesNotMatch(result.stderr, /timed out/);
+  assert.match(result.stderr, /pane run failed.*pane_gone/);
+  const last = calls(s.calls).at(-1)!;
+  assert.deepEqual(last.slice(0, 9), ["pane", "report-agent", "w1:p9", "--source", "ask-agent", "--agent", "argv", "--state", "idle"]);
+});
+
+test("a timeout escalates past ctrl+c so an agent ignoring SIGINT and SIGTERM does not stay running", (t) => {
+  const config = herdrConfig(fixture("p11c-stub-trap"), 1);
+  config.herdr_command = fixture("p11c-stub-herdr");
+  const s = setup(config);
+  const pidFile = join(s.root, "agent.pid");
+  t.after(() => {
+    if (existsSync(pidFile)) {
+      const pid = Number(readFileSync(pidFile, "utf8").trim());
+      if (Number.isInteger(pid) && pid > 0) {
+        try { process.kill(-pid, "SIGKILL"); } catch {}
+        try { process.kill(pid, "SIGKILL"); } catch {}
+      }
+    }
+    rmSync(s.root, { recursive: true, force: true });
+  });
+  const result = runCli(["-a", "argv", "hello"], { ...s.env, STUB_PID_FILE: pidFile });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /argv timed out after 1s/);
+  assert.equal(existsSync(pidFile), true, "stub must have started and recorded its pid");
+  const pid = Number(readFileSync(pidFile, "utf8").trim());
+  assert.ok(Number.isInteger(pid) && pid > 0);
+  let alive = true;
+  try { process.kill(pid, 0); } catch { alive = false; }
+  assert.equal(alive, false, `timed-out agent process ${pid} must not still be running`);
+});
+
+test("a hanging herdr control call times out and falls back to subprocess", (t) => {
+  const config = herdrConfig(fixture("stub-argv"), 1);
+  config.herdr_command = fixture("p11c-stub-herdr");
+  const s = setup(config, { HERDR_HANG_SPLIT: "1" });
+  t.after(() => rmSync(s.root, { recursive: true, force: true }));
+  const binPath = resolve(import.meta.dirname, "..", "bin", "ask-agent-ts");
+  const result = spawnSync(binPath, ["-a", "argv", "hello"], { encoding: "utf8", env: s.env, timeout: 4_000 });
+  assert.equal(result.error, undefined, `CLI hung instead of timing out control call: ${result.error?.message}`);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "--model\nm1\nhello\n");
+  assert.match(result.stderr, /herdr unavailable.*timed out.*falling back to subprocess/);
 });

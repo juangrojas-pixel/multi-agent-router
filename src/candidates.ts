@@ -13,6 +13,7 @@ export type Candidate = {
   quota_left: number | null;
   over_ceiling: boolean;
   reason: string;
+  efforts?: string[];
 };
 
 type Scored = {
@@ -28,7 +29,38 @@ type Scored = {
   rating: number;
   agentOrder: number;
   sharesQuotaWith?: string;
+  efforts?: string[];
 };
+
+const effortOrder = ["low", "medium", "high", "xhigh", "max"];
+const effortSuffix = /-(low|medium|high|xhigh|max)$/;
+
+// Effort variants of one model (same agent, tier and cost) become one candidate: the `-high`
+// variant when the agent offers it, else the best-ranked one, listing every effort offered.
+function groupEfforts(sorted: Scored[]): Scored[] {
+  const groups = new Map<string, Scored[]>();
+  for (const item of sorted) {
+    const base = item.model.replace(effortSuffix, "");
+    const key = `${item.agent}\u0000${base}\u0000${item.tier}\u0000${item.est_cost}`;
+    const list = groups.get(key);
+    if (list) list.push(item); else groups.set(key, [item]);
+  }
+  const seen = new Set<string>();
+  const out: Scored[] = [];
+  for (const item of sorted) {
+    const base = item.model.replace(effortSuffix, "");
+    const key = `${item.agent}\u0000${base}\u0000${item.tier}\u0000${item.est_cost}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const members = groups.get(key)!;
+    if (members.length === 1) { out.push(item); continue; }
+    const efforts = members.map((m) => effortSuffix.exec(m.model)?.[1] ?? "")
+      .sort((a, b) => effortOrder.indexOf(a) - effortOrder.indexOf(b));
+    const pick = members.find((m) => m.model.endsWith("-high")) ?? item;
+    out.push({ ...pick, efforts: efforts.filter(Boolean) });
+  }
+  return out;
+}
 
 const usage = "usage: ask-agent candidates --kind KIND --tier TIER [--size s|m|l] [--client] [-n N] [--json]";
 
@@ -161,6 +193,7 @@ export async function candidatesCommand(config: Config, args: string[]): Promise
   }
 
   capable.sort(compareCostAndScore);
+  capable.splice(0, capable.length, ...groupEfforts(capable));
   const altIndex = capable.findIndex((item) => !item.over_ceiling && item.est_cost !== null);
 
   const ranked: Candidate[] = capable.map((item, index) => {
@@ -188,6 +221,7 @@ export async function candidatesCommand(config: Config, args: string[]): Promise
       quota_left: item.quota_left,
       over_ceiling: item.over_ceiling,
       reason,
+      ...(item.efforts ? { efforts: item.efforts } : {}),
     };
   });
 
@@ -198,6 +232,7 @@ export async function candidatesCommand(config: Config, args: string[]): Promise
     const lines = shown.map((c, index) => [
       c.over_ceiling ? "!" : String(index + 1),
       `${c.agent}/${c.model}`,
+      ...(c.efforts ? [`efforts=${c.efforts.join(",")}`] : []),
       `tier=${c.tier}${c.tier_source === "declared" ? "*" : ""}`,
       `cost=${c.est_cost === null ? "?" : c.est_cost}`,
       ...(c.quota_left === null ? [] : [`quota ${Math.round(c.quota_left * 100)}%`]),

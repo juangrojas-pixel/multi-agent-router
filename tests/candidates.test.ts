@@ -380,3 +380,26 @@ test("exits 2 with clear errors on unknown kind, tier, size, missing flags, or b
     }, `args: ${args.join(" ")}`);
   }
 });
+
+test("effort variants of one model collapse into one line that recommends -high", (t) => {
+  const { env } = baseSetup(t, {
+    catalog: { agents: { agy: { fetched_at: now, source: "cli", models: [
+      { id: "gemini-4-neon-low", status: "usable", quota_group: "Gemini Models", quota_left: 0.96 },
+      { id: "gemini-4-neon-medium", status: "usable", quota_group: "Gemini Models", quota_left: 0.96 },
+      { id: "gemini-4-neon-high", status: "usable", quota_group: "Gemini Models", quota_left: 0.96 },
+      { id: "gemini-4-neon-xhigh", status: "usable", quota_group: "Gemini Models", quota_left: 0.96 },
+      { id: "gemini-4-hydrogen-low", status: "usable", quota_group: "Gemini Models", quota_left: 0.96 },
+    ] } } },
+  });
+  const text = runCli(["candidates", "--kind", "code", "--tier", "standard"], env);
+  assert.equal(text.status, 0, text.stderr);
+  assert.deepEqual(text.stdout.trimEnd().split("\n").filter((line) => line.includes("agy/")), [
+    "1  agy/gemini-4-hydrogen-low  tier=standard  cost=0.4  quota 96%  cheapest capable",
+    "2  agy/gemini-4-neon-high  efforts=low,medium,high,xhigh  tier=frontier  cost=1.2  quota 96%  frontier tier",
+  ]);
+  const json = JSON.parse(runCli(["candidates", "--kind", "code", "--tier", "standard", "--json"], env).stdout);
+  assert.deepEqual(json.filter((c: { agent: string }) => c.agent === "agy").map((c: { model: string; efforts?: string[] }) => [c.model, c.efforts ?? null]), [
+    ["gemini-4-hydrogen-low", null],
+    ["gemini-4-neon-high", ["low", "medium", "high", "xhigh"]],
+  ]);
+});

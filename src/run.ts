@@ -5,6 +5,8 @@ import type { Config } from "./config.ts";
 import { hcRun, type ProcessResult } from "./hc.ts";
 import { changedFiles, cooldown, gitSnapshot, readCache, record, setCooldown } from "./state.ts";
 
+// A refusal of one model (not the agent's quota): that run fails, the agent stays available.
+const modelRefusalPattern = /requires usage credits|switch to another model/i;
 const quotaPattern = /rate.?limit|quota|429|resource.?exhausted|usage limit|too many requests|limit reached/i;
 
 export function commandExists(command: string): boolean {
@@ -188,7 +190,8 @@ async function execute(
   const combined = `${result.stdout.replace(/\n+$/, "")}\n${result.stderr.replace(/\n+$/, "")}`;
   const answer = parseOutput(built.output, result.stdout);
   const meta = parseMeta(built.output, result.stdout);
-  const quota = quotaPattern.test(output);
+  const modelRefused = modelRefusalPattern.test(output);
+  const quota = !modelRefused && quotaPattern.test(output);
 
   record(
     id,
@@ -215,6 +218,11 @@ async function execute(
   if (result.status === 0 && answer.trim()) return { result: { ok: true, quota: false, reason: "", stderr: "" }, answer };
   if (result.timedOut) {
     return { result: { ok: false, quota: false, reason: "timeout", stderr: `${id} timed out after ${timeoutSeconds}s` }, answer };
+  }
+  if (modelRefused) {
+    let message = lastLines(combined, 1).trim();
+    try { message = String(JSON.parse(result.stdout).result ?? message); } catch {}
+    return { result: { ok: false, quota: false, reason: "model unavailable", stderr: `${id} cannot run model ${model}: ${message}` }, answer };
   }
   if (quota) {
     return { result: { ok: false, quota: true, reason: "quota", stderr: `${id} hit a quota/rate limit: ${lastLines(combined, 3)}`, until }, answer };

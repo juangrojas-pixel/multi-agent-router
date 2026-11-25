@@ -225,3 +225,14 @@ test("a fallback agent that cannot run the requested model is skipped, not run",
   assert.match(result.stderr, /\[ask-agent\] skip g: model m1 is not usable \(not in agents\.g\.models\)\n/);
   assert.deepEqual(runs(s.root).map((row) => row.agent), ["f"]);
 });
+
+test("a model that needs usage credits fails that run without cooling the whole agent down", () => {
+  const s = scratchConfig(printConfig("claude-json", "fable"));
+  const out = JSON.stringify({ type: "result", subtype: "success", is_error: true, api_error_status: 429,
+    result: "Fable 5.2 requires usage credits. Switch to another model to continue." });
+  const result = runCli(["-a", "p", "hello"], { ...s.env, STUB_OUTPUT: out });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /\[ask-agent\] p cannot run model fable: Fable 5\.2 requires usage credits\. Switch to another model to continue\.\n/);
+  assert.doesNotMatch(result.stderr, /cooled down/);
+  assert.equal(existsSync(join(s.root, "cache", "multi-agent-router", "cooldown.json")), false);
+});

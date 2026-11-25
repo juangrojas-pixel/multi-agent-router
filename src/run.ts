@@ -3,7 +3,7 @@ import { accessSync, constants } from "node:fs";
 import { buildAgent, commandArgs, parseOutput } from "./agents.ts";
 import type { Config } from "./config.ts";
 import { hcRun, type ProcessResult } from "./hc.ts";
-import { changedFiles, cooldown, gitSnapshot, record, setCooldown } from "./state.ts";
+import { changedFiles, cooldown, gitSnapshot, readCache, record, setCooldown } from "./state.ts";
 
 const quotaPattern = /rate.?limit|quota|429|resource.?exhausted|usage limit|too many requests|limit reached/i;
 
@@ -73,6 +73,27 @@ function agyQuotaReason(command: string, quota: { group: string; min_remaining: 
   setCooldown("agy", Math.floor(Date.parse(lowest.reset_time) / 1000));
   const percent = (fraction: number) => Math.floor(fraction * 100);
   return `quota low (${percent(lowest.remaining_fraction)}% < ${percent(quota.min_remaining)}%)`;
+}
+
+// Task ID and reason of the current run (`--task`, `--reason`), recorded in runs.jsonl.
+let runContext = { task: "", reason: "" };
+export function setRunContext(task: string, reason: string): void { runContext = { task, reason }; }
+
+type CatalogCache = { agents?: Record<string, { models?: Array<{ id: string; status: string }> }> };
+
+// Why `model` cannot run on agent `id`, or null. The catalog (catalog.json) wins when it lists
+// the agent: only usable and unverified models run. Without it, config `models` decides.
+export function modelProblem(id: string, config: Config, model: string): string | null {
+  if (!model) return null;
+  const listed = readCache<CatalogCache>("catalog.json")?.agents?.[id]?.models;
+  if (listed) {
+    const entry = listed.find((item) => item.id === model);
+    if (!entry) return "not in catalog";
+    return entry.status === "usable" || entry.status === "unverified" ? null : entry.status;
+  }
+  const declared = config.agents[id]?.models;
+  if (declared && !declared.includes(model)) return `not in agents.${id}.models`;
+  return null;
 }
 
 // Backend precedence: the --backend flag, then agents.<id>.backend, then backend, then subprocess.
@@ -176,6 +197,12 @@ async function execute(
     answer || output,
     changedFiles(before, gitSnapshot()),
     role,
+    {
+      requested_model: requestedModel,
+      model_source: "requested",
+      ...(runContext.task ? { task_id: runContext.task } : {}),
+      ...(runContext.reason ? { reason: runContext.reason } : {}),
+    },
   );
   // The cooldown is written by the caller after it logs the quota error, as the bash router does.
   const until = quota ? Math.floor(Date.now() / 1000) + (config.cooldown_seconds ?? 3600) : undefined;

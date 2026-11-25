@@ -89,7 +89,26 @@ Site-specific text (client guards, confirmation protocols, client preambles) can
 
 ### Run history
 
-Every agent run, successful or not, appends one JSON line to `~/.cache/multi-agent-router/runs.jsonl` (`$XDG_CACHE_HOME` honored): `ts`, `agent`, `tier`, `role` (TypeScript router only), `model`, `cwd`, `exit`, `seconds`, `prompt` (task without the preamble, first 2000 chars), `prompt_chars`, `answer` (first 2000 chars) and `changed_files`.
+Every agent run, successful or not, appends one JSON line to `~/.cache/multi-agent-router/runs.jsonl` (`$XDG_CACHE_HOME` honored): `ts`, `agent`, `tier`, `role` (TypeScript router only), `model`, `cwd`, `exit`, `seconds`, `prompt` (task without the preamble, first 2000 chars), `prompt_chars`, `answer` (first 2000 chars) and `changed_files`. The TypeScript router also records `requested_model` (the `-m` or role model, empty when none), `model_source` (`requested`: the model the router passed), and, when given, `task_id` (`--task ID`) and `reason` (`--reason TEXT`), so each delegated task keeps who ran it, with which model and why.
+
+### Model catalog
+
+`ask-agent catalog [-a AGENT] [--refresh] [--json]` lists, per enabled agent, the models it can run right now. `--refresh` runs each agent's `list_models` command (its own CLI, no quota spent) and writes `~/.cache/multi-agent-router/catalog.json`; without it the cache is read and no agent runs (a missing cache refreshes). Each model is `usable` (listed by the agent), `unavailable` (in config `models` but not listed), `out_of_quota` (its agy quota group is under `quota.min_remaining`) or `unverified` (the agent has no list command, or it failed: config `models` are shown). `-a AGENT` refreshes or shows one agent and keeps the others in the cache.
+
+```json
+"agy": {
+  "list_models": { "cmd": ["agy", "models"], "parse": "tsv", "timeout_seconds": 60 },
+  "quota_groups": { "gemini-*": "Gemini Models", "*": "Claude and GPT models" }
+}
+```
+
+Parsers: `tsv` (first tab field), `lines-first-field` (first word of lines that look like a model id) and `pi-table` (`pi --list-models` rows, joined as `provider/model`, the form `--model` takes). `quota_groups` maps model ids to agy usage groups by glob, first match wins.
+
+### Choosing the model per task
+
+`-a AGENT -m MODEL` checks the model before the agent starts. When `catalog.json` (written by `ask-agent catalog`) lists the agent, only models it marks `usable` or `unverified` run; otherwise the agent's config `models` decide, and an agent without `models` accepts any model. A refused model exits 2 with `model MODEL is not usable for agent AGENT (REASON)` and records no run.
+
+The `claude` agent (Claude Code in print mode) is enabled for explicit use only: `-a claude -m haiku|sonnet|opus`. It is in no tier or role, so nothing routes to it by default, but `status` and the status line now list it as ready. It shares the orchestrator's quota (`shares_quota_with`).
 
 `changed_files` lists the paths of the run's git repo that changed during the run: new or different `git status` entries plus files in commits made during the run. It is empty outside a git repo. A file that was already modified before the run and is modified again does not show up. `last/<agent>.json` still keeps the latest run of each agent.
 

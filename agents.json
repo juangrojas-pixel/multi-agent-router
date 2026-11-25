@@ -81,7 +81,15 @@
       "extra_args": [
         "--tools",
         "read,grep,find,ls"
-      ]
+      ],
+      "list_models": {
+        "cmd": [
+          "pi",
+          "--list-models"
+        ],
+        "parse": "pi-table",
+        "timeout_seconds": 60
+      }
     },
     "agy": {
       "enabled": true,
@@ -94,7 +102,19 @@
         "group": "Gemini Models",
         "min_remaining": 0.1
       },
-      "prompt_preamble": "You are an executor called by another agent. Do the task end to end inside the current working directory: create and edit files and run the commands it needs. On remote servers, cloud accounts and databases you are read-only: only list, get, read logs and SELECT. When a guard or permission check denies a call, stop the task and reply with the denial message and the exact blocked command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result."
+      "prompt_preamble": "You are an executor called by another agent. Do the task end to end inside the current working directory: create and edit files and run the commands it needs. On remote servers, cloud accounts and databases you are read-only: only list, get, read logs and SELECT. When a guard or permission check denies a call, stop the task and reply with the denial message and the exact blocked command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result.",
+      "list_models": {
+        "cmd": [
+          "agy",
+          "models"
+        ],
+        "parse": "tsv",
+        "timeout_seconds": 60
+      },
+      "quota_groups": {
+        "gemini-*": "Gemini Models",
+        "*": "Claude and GPT models"
+      }
     },
     "opencode": {
       "enabled": true,
@@ -106,19 +126,36 @@
       "prompt_preamble": "You are an executor called by another agent. Do the task end to end inside the current working directory: create and edit files and run the commands it needs. Do not touch files outside it, do not push, publish, delete data, or connect to remote servers. When done, reply with a short receipt only: files written and commands run with their result.",
       "fallback": [
         "agy"
-      ]
+      ],
+      "list_models": {
+        "cmd": [
+          "opencode",
+          "models"
+        ],
+        "parse": "lines-first-field",
+        "timeout_seconds": 60
+      }
     },
     "gentle-shell": {
       "enabled": true,
       "description": "Full gentle-ai stack on pi; executes tasks that need real thinking; explicit use only (-a gentle-shell), never in tiers",
       "command": "gentle-shell",
-      "model": null,
+      "model": "openai-codex/gpt-6.2-sol",
       "timeout_seconds": 1800,
       "extra_args": [],
-      "prompt_preamble": "You are an executor called by another agent. Do the task end to end: create and edit files and run the commands it needs, including remote servers, cloud CLIs and databases when the task asks for it. When a guard or permission check blocks a command, stop the task and reply with the denial message and the exact blocked command; never bypass the check unless this task says the user confirmed that exact command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result."
+      "prompt_preamble": "You are an executor called by another agent. Do the task end to end: create and edit files and run the commands it needs, including remote servers, cloud CLIs and databases when the task asks for it. When a guard or permission check blocks a command, stop the task and reply with the denial message and the exact blocked command; never bypass the check unless this task says the user confirmed that exact command. Do not push or publish. When done, reply with a short receipt only: files written and commands run with their result.",
+      "list_models": {
+        "cmd": [
+          "gentle-shell",
+          "--",
+          "--list-models"
+        ],
+        "parse": "pi-table",
+        "timeout_seconds": 120
+      }
     },
     "claude": {
-      "enabled": false,
+      "enabled": true,
       "command": "claude",
       "model": null,
       "timeout_seconds": 600,
@@ -133,7 +170,14 @@
         "--model",
         "{model}"
       ],
-      "output": "text"
+      "output": "text",
+      "models": [
+        "haiku",
+        "sonnet",
+        "opus"
+      ],
+      "shares_quota_with": "orchestrator",
+      "description": "Claude Code in print mode; explicit use only (-a claude -m haiku|sonnet|opus), never in tiers or roles; shares the orchestrator quota"
     }
   },
   "routing": {

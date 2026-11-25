@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+if [[ -n ${STUB_MARKER:-} ]]; then
+  printf '%s\n' "$1" >> "$STUB_MARKER"
+fi
+case "$1" in
+  -p) [[ "$2" == /usage ]] || exit 2; printf '%s\n' "$STUB_USAGE" ;;
+  fail) printf 'model listing failed\n' >&2; exit 9 ;;
+  slow) exec sleep 2 ;;
+  models) printf '%s' "${2:-${STUB_MODELS:-}}" ;;
+  *) exit 2 ;;
+esac

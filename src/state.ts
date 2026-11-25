@@ -120,6 +120,7 @@ export function record(
   answer: string,
   files: string[],
   role = "",
+  extra: Record<string, unknown> = {},
 ): void {
   ensure();
   const row = {
@@ -135,6 +136,7 @@ export function record(
     prompt_chars: prompt.length,
     answer: answer.slice(0, 2000),
     changed_files: files,
+    ...extra,
   };
   appendFileSync(join(stateDir(), "runs.jsonl"), `${JSON.stringify(row)}\n`);
 

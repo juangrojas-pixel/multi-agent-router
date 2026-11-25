@@ -58,7 +58,7 @@ const cases: Array<[string, object, string]> = [
 
 const agentCases: Array<[string, object, string]> = [
   ["unknown list_models parser", { list_models: { cmd: ["x"], parse: "xml" } },
-    "config: agents.plain.list_models.parse: unknown parser: xml (use tsv or lines-first-field)"],
+    "config: agents.plain.list_models.parse: unknown parser: xml (use tsv, lines-first-field or pi-table)"],
   ["empty list_models command", { list_models: { cmd: [], parse: "tsv" } },
     "config: agents.plain.list_models.cmd: must start with a non-empty command"],
   ["empty version_cmd", { version_cmd: [""] },

@@ -2,8 +2,9 @@ import { readFileSync, statSync } from "node:fs";
 import { configPath, loadConfig, loadPolicy, mergeConfig, validateConfig, type Config } from "./config.ts";
 import { guidance } from "./guidance.ts";
 import { listRoles, resolveRole, runRole, type RoleEntry } from "./roles.ts";
-import { agyUsage, attempt, available, commandExists, runParallel, setBackendFlag } from "./run.ts";
+import { agyUsage, attempt, available, commandExists, modelProblem, runParallel, setBackendFlag, setRunContext } from "./run.ts";
 import { clearCooldown, jqText, runsFile, runsTable } from "./state.ts";
+import { catalogCommand } from "./catalog.ts";
 
 const original = process.argv.slice(2);
 const NESTED = "error: nested call refused: ask-agent is already running an agent";
@@ -83,6 +84,7 @@ function status(): number {
 }
 
 if (original[0] === "status") process.exit(status());
+if (original[0] === "catalog") process.exit(await catalogCommand(config, original.slice(1)));
 if (original[0] === "reset") {
   const agent = original[1] ?? "";
   clearCooldown(agent);
@@ -117,6 +119,8 @@ let role = "";
 let model = "";
 let prompt = "";
 let dir = "";
+let taskId = "";
+let reason = "";
 
 function optionValue(index: number): string {
   const value = args[index + 1];
@@ -135,6 +139,8 @@ for (let index = 0; index < args.length; index += 1) {
   else if (!parallel && (argument === "-r" || argument === "--role")) role = optionValue(index++);
   else if (argument === "-m" || argument === "--model") model = optionValue(index++);
   else if (argument === "-C" || argument === "--cwd") dir = optionValue(index++);
+  else if (argument === "--task") taskId = optionValue(index++);
+  else if (argument === "--reason") reason = optionValue(index++);
   else if (argument === "--backend") {
     const backend = args[++index] ?? "";
     if (backend !== "hc" && backend !== "subprocess") fail(`error: unknown backend: ${backend} (use hc or subprocess)`);
@@ -146,12 +152,14 @@ for (let index = 0; index < args.length; index += 1) {
       "",
       "Usage:",
       "  ask-agent [-t TIER | -a AGENT] [-m MODEL] [-C DIR] [PROMPT]   first ready agent answers",
+      "    --task ID --reason TEXT                                     recorded with the run in runs.jsonl",
       "  ask-agent -r ROLE [-C DIR] [PROMPT]                           run as a role from agents.json",
       "  ask-agent roles                                               role entries: agent, model, effort, ready",
       "  ask-agent guidance                                            routing guidance for the orchestrator",
       "  ask-agent config                                              merged config (agents.json + private policy) as JSON",
       "  ask-agent parallel [-t TIER | -a A,B] [-C DIR] [PROMPT]       every ready agent answers",
       "  ask-agent status                                              readiness, tiers, agy quota",
+      "  ask-agent catalog [-a AGENT] [--refresh] [--json]             usable models per agent, with status and quota",
       "  ask-agent reset [AGENT]                                       clear cooldowns",
       "  ask-agent runs [N] [-a AGENT]                                 run history (runs.jsonl)",
       "Tiers: think | execute | draft (see agents.json). Prompt is read from stdin if omitted.",
@@ -195,12 +203,17 @@ if (!prompt) {
 if (!prompt.trim()) fail("error: empty prompt");
 if (parallel) changeDir();
 
+setRunContext(taskId, reason);
 if (role) process.exit((await runRole(config, role, roleEntries, prompt)) ? 0 : 2);
 
 let candidates: string[];
 if (agents) {
   const named = parallel ? agents.split(",").filter(Boolean) : agents.split(",");
   for (const id of named) if (!config.agents[id]) fail(`error: unknown agent: ${id}`);
+  for (const id of named) {
+    const problem = modelProblem(id, config, model);
+    if (problem) fail(`model ${model} is not usable for agent ${id} (${problem})`);
+  }
   candidates = [];
   for (const id of named) {
     for (const candidate of [id, ...(config.agents[id].fallback ?? [])]) {

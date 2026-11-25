@@ -27,7 +27,7 @@ export type Config = {
 };
 
 const outputs = ["text", "agy-json", "opencode-events"];
-export const listParsers = ["tsv", "lines-first-field"];
+export const listParsers = ["tsv", "lines-first-field", "pi-table"];
 export const benchmarkParsers = ["models-dev", "lmarena-hf", "openrouter", "artificial-analysis"];
 
 function badCommand(cmd: unknown): boolean {
@@ -44,7 +44,7 @@ export function validateConfig(config: Config): string | null {
     if (agent.list_models) {
       if (badCommand(agent.list_models.cmd)) return `agents.${id}.list_models.cmd: must start with a non-empty command`;
       if (!listParsers.includes(agent.list_models.parse)) {
-        return `agents.${id}.list_models.parse: unknown parser: ${agent.list_models.parse} (use tsv or lines-first-field)`;
+        return `agents.${id}.list_models.parse: unknown parser: ${agent.list_models.parse} (use tsv, lines-first-field or pi-table)`;
       }
     }
     if (agent.version_cmd !== undefined && badCommand(agent.version_cmd)) return `agents.${id}.version_cmd: must start with a non-empty command`;

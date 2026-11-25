@@ -20,9 +20,9 @@ Authority: `specs/002-agentic-dispatcher/` (spec.md, plan.md, research.md, data-
 
 Task IDs are those of `specs/002-agentic-dispatcher/tasks.md`.
 
-- [ ] P2 Foundational T003-T005 (all S). Route: inline (about 80 lines, blocks both MVP units).
-- [ ] P3 US2 T006-T010 (S3). Route: inline by Claude, in parallel with P4.
-- [ ] P4 US1 T011-T014 (S2). Route: delegated to gentle-shell (writer reason: parallel unit with P3, disjoint surfaces; user rule "te lo repartis con gentle-shell"). `src/cli.ts` wiring done by parent before launch.
+- [x] P2 Foundational T003-T005 (all S). Route: inline (about 80 lines, blocks both MVP units). Commit `9f8a93c`. RED 11 failing, GREEN 23/23.
+- [x] P3 US2 T006-T010 (S3). Route: inline by Claude, in parallel with P4. RED 4 failing, GREEN 9/9; full suites green (124 node excl. catalog, 35 parity, 51 route-hint). Commit: see L8.
+- [x] P4 US1 T011-T014 (S2). Route: delegated to gentle-shell on `openai-codex/gpt-6.2-sol` (writer reason: parallel unit with P3, disjoint surfaces; user rule "te lo repartis con gentle-shell"). `src/cli.ts` wiring done by parent before launch. RED 4 observed by the writer; seam check 128/128. `pi-table` parser added inline after the real run (RED 1, GREEN 129/129). Commit: see L8.
 - [ ] P5 US3 T015-T017 (S4). Not this session.
 - [ ] P6 US6 T001, T018-T020 (S7). Not this session.
 - [ ] P7 US4 T021-T022 (S5). Not this session.
@@ -35,3 +35,7 @@ Task IDs are those of `specs/002-agentic-dispatcher/tasks.md`.
 - L2 (2026-11-25) User: "si, arranca con el plan podemos puedes guiarte por ejemplo de paginas como esta para saber que sirve para cada modelo o que haya una ofrma de consultar siempre los modelos que tenemos disponibles y podemos utilizar , por que a veces hay modelos que salen pero no podemos utilizar tambien que valida costo valor si hago una tarea que me va a gastar mucho mejor la hago con otro cosas asi quiero crear algo que sirva de verdad, que claude pueda decidir si es mejor mandar varios agentes, hacer un ajambre de agentes ccositas asi estamos en la era agentica necesitamos sacar todfo el provecho a esto https://artificialanalysis.ai/ esa u n pagina de ejemplo pero hay mas donde puede consultar me entiendes y cachas la idea?"
 - L3 (2026-11-25) Spec Kit run: specify, plan, tasks, analyze (0 critical). Spec commit `ed66a56`. Prior-session role work committed separately as `97eeb64` (103 node tests, 35 parity, 51 route-hint green).
 - L4 (2026-11-25) User: "si, aplicalas y arranca con el MVP". Remediation E1-E3, F1-F2 applied before the spec commit.
+- L5 (2026-11-25) Spec drift found while writing T003: `tiers` already holds the agent tier lists, so the capability vocabulary is `capability_tiers`; data-model, research, tasks and spec updated.
+- L6 (2026-11-25) US2 done inline. `model_source` is always `requested` for now: parsing the model an agent reports needs real agy/opencode output samples (costs quota); deferred, recorded as partial for T008. gentle-shell default model set to `openai-codex/gpt-6.2-sol`; `claude` agent enabled for explicit use (README notes it now shows as ready). P4 delegated to gentle-shell with `-m openai-codex/gpt-6.2-sol` (first dogfood of per-task model choice).
+- L7 (2026-11-25) gentle-shell receipt: wrote src/catalog.ts, tests/catalog.test.ts, tests/fixtures/stub-models; RED observed; stopped by engram_save_guard on a project-less mem_save (bookkeeping only), so its suite run was unconfirmed. Parent seam check: 128 node, 35 parity, 51 route-hint green. Real `catalog --refresh` (24.7 s, under SC-002's 30 s): agy 28 usable with quota groups, opencode 9 free, claude 3 unverified; codex/gentle-shell showed only `openai-codex` because pi prints a provider/model table, fixed with the `pi-table` parser. Real refusal: `-a gentle-shell -m openai-codex/gpt-9-ghost` exits 2 "not in catalog".
+- L8 (2026-11-25) MVP (P2 foundation already in `9f8a93c`; P3 + P4) committed as one work unit (about 380 authored lines). Risk: item 3 (shared `-a` path now refuses a model outside config `models` or the catalog; existing behavior preserved for agents without `models`, pinned by tests and parity suite).

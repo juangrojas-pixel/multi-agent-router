@@ -2,6 +2,7 @@ import { execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import type { Agent, Config } from "./config.ts";
+import { benchmarkCache, profileFor, refreshBenchmarks, type BenchmarkProfile, type BenchmarkCache } from "./benchmarks.ts";
 import { agyUsage } from "./run.ts";
 import { readCache, writeCache } from "./state.ts";
 
@@ -11,6 +12,7 @@ type Model = {
   reason?: string;
   quota_group?: string;
   quota_left?: number;
+  profile?: BenchmarkProfile | null;
 };
 type AgentCatalog = { fetched_at: string; source: "cli" | "config"; models: Model[] };
 type Catalog = { agents: Record<string, AgentCatalog> };
@@ -79,11 +81,12 @@ if (!isMainThread && typeof workerData?.catalogQuotaCommand === "string") {
 }
 
 function fetchQuota(command: string): Promise<Map<string, number>> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const worker = new Worker(new URL(import.meta.url), { workerData: { catalogQuotaCommand: command } });
     worker.once("message", resolve);
-    worker.once("error", reject);
-    worker.once("exit", (code) => reject(new Error(`quota worker exited without a report (${code})`)));
+    // A crashed worker leaves quota unknown for this agent instead of failing the whole catalog.
+    worker.once("error", () => resolve(new Map()));
+    worker.once("exit", () => resolve(new Map()));
   });
 }
 
@@ -92,7 +95,7 @@ async function listForPreflight(list: Agent["list_models"]): Promise<Set<string>
   const [command, ...args] = list.cmd;
   try {
     const { stdout } = await exec(command, args, {
-      encoding: "utf8", timeout: Math.min(list.timeout_seconds ?? 60, 45) * 1000, killSignal: "SIGKILL",
+      encoding: "utf8", timeout: (list.timeout_seconds ?? 60) * 1000, killSignal: "SIGKILL",
     });
     return parseModels(stdout, list.parse);
   } catch {
@@ -131,15 +134,21 @@ async function fetchAgent(id: string, agent: Agent, concurrent: boolean): Promis
   return { fetched_at: new Date().toISOString(), source: listed ? "cli" : "config", models };
 }
 
-function render(catalog: Catalog): string {
+function render(catalog: Catalog, sources?: BenchmarkCache["sources"]): string {
   const lines: string[] = [];
   for (const [id, agent] of Object.entries(catalog.agents)) {
     lines.push(`${id}  (listed ${agent.fetched_at.slice(0, 16).replace("T", " ")}, ${agent.source})`);
     for (const model of agent.models) {
       const quota = model.quota_left === undefined ? "" : `  quota ${Math.round(model.quota_left * 100)}% (${model.quota_group})`;
-      lines.push(`  ${model.status.padEnd(12)}  ${model.id}${quota}${model.reason ? `  (${model.reason})` : ""}`);
+      const profile = model.profile;
+      const tiers = Object.entries(profile?.tier ?? {}).map(([kind, tier]) =>
+        `  ${kind}=${tier}${profile?.tier_source[kind] === "declared" ? "*" : ""}`).join("");
+      const price = profile?.price_out_per_m === undefined ? "" : `  $out/M=${profile.price_out_per_m}`;
+      lines.push(`  ${model.status.padEnd(12)}  ${model.id}${tiers}${price}${quota}${model.reason ? `  (${model.reason})` : ""}`);
     }
   }
+  if (sources) lines.push(`sources: ${Object.entries(sources).map(([id, entry]) =>
+    `${id} ${entry.fetched_at?.slice(0, 10) ?? "-"} ${entry.status}`).join(", ")}`);
   return lines.length ? `${lines.join("\n")}\n` : "";
 }
 
@@ -163,8 +172,16 @@ export async function catalogCommand(config: Config, args: string[]): Promise<nu
     }
   }
   if (selected !== undefined && !Object.hasOwn(config.agents, selected)) return error(`unknown agent: ${selected}`);
+  const benchmarks = config.benchmarks
+    ? refresh ? await refreshBenchmarks(config) : benchmarkCache(config)
+    : undefined;
   const result = await buildCatalog(config, { refresh, agent: selected });
-  process.stdout.write(json ? `${JSON.stringify(result, null, 2)}\n` : render(result));
+  if (benchmarks) {
+    for (const agent of Object.values(result.agents)) {
+      for (const model of agent.models) model.profile = profileFor(config, benchmarks, model.id);
+    }
+  }
+  process.stdout.write(json ? `${JSON.stringify(result, null, 2)}\n` : render(result, benchmarks?.sources));
   return 0;
 }
 
@@ -182,7 +199,13 @@ export async function buildCatalog(config: Config, { refresh, agent: selected, c
       for (const [id, agent] of agents) entries.push([id, await fetchAgent(id, agent, false)]);
     }
   } else {
-    for (const [id] of agents) if (Object.hasOwn(cached, id)) entries.push([id, cached[id]]);
+    // Agents enabled after the last refresh are listed now instead of silently left out.
+    let added = false;
+    for (const [id, agent] of agents) {
+      if (Object.hasOwn(cached, id)) entries.push([id, cached[id]]);
+      else { entries.push([id, await fetchAgent(id, agent, concurrent)]); added = true; }
+    }
+    if (added) writeCache(cacheName, { agents: { ...cached, ...Object.fromEntries(entries) } });
   }
   const result: Catalog = { agents: Object.fromEntries(entries) };
   if (refresh || !cached) {

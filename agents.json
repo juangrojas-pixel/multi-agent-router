@@ -1,6 +1,32 @@
 {
   "cooldown_seconds": 3600,
   "default_tier": "execute",
+  "capability_tiers": ["light", "standard", "strong", "frontier"],
+  "kinds": ["code", "reasoning", "writing", "review"],
+  "model_aliases": {
+    "haiku": "claude-haiku-5-5",
+    "sonnet": "claude-sonnet-5-5",
+    "opus": "claude-opus-5-5"
+  },
+  "benchmarks": {
+    "max_age_days": 7,
+    "sources": [
+      { "id": "models-dev", "url": "https://models.dev/api.json", "parse": "models-dev" },
+      {
+        "id": "lmarena",
+        "url": "https://datasets-server.huggingface.co/filter?dataset=lmarena-ai/leaderboard-dataset&config=text&split=latest&where=%22category%22%3D%27coding%27%20OR%20%22category%22%3D%27webdev%27%20OR%20%22category%22%3D%27math%27%20OR%20%22category%22%3D%27hard_prompts%27%20OR%20%22category%22%3D%27creative_writing%27%20OR%20%22category%22%3D%27instruction_following%27&offset=0&length=100",
+        "parse": "lmarena-hf",
+        "categories": {
+          "code": ["coding", "webdev"],
+          "reasoning": ["math", "hard_prompts"],
+          "writing": ["creative_writing", "instruction_following"],
+          "review": ["hard_prompts"]
+        },
+        "tier_bands": { "frontier": 5, "strong": 15, "standard": 40 }
+      },
+      { "id": "openrouter", "url": "https://openrouter.ai/api/v1/models", "parse": "openrouter", "role": "fallback" }
+    ]
+  },
   "tiers": {
     "think": [
       "codex",

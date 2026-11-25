@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fixture, runCli, scratchConfig } from "./fixtures/helpers.ts";
@@ -129,4 +129,16 @@ test("pi-table joins provider and model columns and skips warnings and the heade
   const catalog = json(["--refresh"], env);
   assert.deepEqual(catalog.agents.pi.models, [usable("openai-codex/gpt-6.2-sol"), usable("openai/gpt-6.1-terra"), usable("openai/gpt-7")]);
   assert.deepEqual(saved(cache).agents.pi.models, catalog.agents.pi.models);
+});
+
+test("a cached catalog still lists an agent enabled after the last refresh", (t) => {
+  const { env, cache } = setup(t, { one: { ...agent, list_models: list("a\n") } });
+  json(["--refresh"], env);
+  const config = JSON.parse(readFileSync(env.ASK_AGENT_CONFIG!, "utf8"));
+  config.agents.two = { ...agent, list_models: list("b\n") };
+  writeFileSync(env.ASK_AGENT_CONFIG!, JSON.stringify(config));
+  const catalog = json([], env);
+  assert.deepEqual(Object.keys(catalog.agents).sort(), ["one", "two"]);
+  assert.deepEqual(catalog.agents.two.models, [usable("b")]);
+  assert.deepEqual(Object.keys(saved(cache).agents).sort(), ["one", "two"]);
 });

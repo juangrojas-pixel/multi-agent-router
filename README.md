@@ -104,6 +104,16 @@ Every agent run, successful or not, appends one JSON line to `~/.cache/multi-age
 
 Parsers: `tsv` (first tab field), `lines-first-field` (first word of lines that look like a model id) and `pi-table` (`pi --list-models` rows, joined as `provider/model`, the form `--model` takes). `quota_groups` maps model ids to agy usage groups by glob, first match wins.
 
+### Benchmark profiles
+
+With `benchmarks` configured, only `ask-agent catalog --refresh` fetches benchmark sources. Plain `catalog` reads the cache, and `preflight` only checks its age. If a source is unreachable, the last successful data and date stay visible as `stale`; a source with no cached data is `failed`. The `sources:` line shows each source's date and status (`-` means no successful fetch).
+
+- [models.dev](https://models.dev/) supplies primary output prices in USD per million tokens and model metadata. [OpenRouter](https://openrouter.ai/) supplies fallback prices for models absent from models.dev.
+- [LMArena's leaderboard dataset](https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)) supplies ratings and ranks. The best rank among each kind's mapped categories determines its measured tier.
+- [Artificial Analysis](https://artificialanalysis.ai/) is an optional speed source. It requires attribution and an API key in `benchmarks.sources[].api_key` in private policy, never in the repository. Private policy replaces the `sources` array, so include the public sources you want to retain. Without a key, that source is skipped without a request.
+
+Set `model_aliases` for names that don't match after normalization. A tier declared in `models.<id>.tier` overrides a measured one and is marked `*`. `$out/M` is a price indicator, not a subscription charge. `catalog --json` adds `profile` to each model; `null` means no benchmark data or declared tier, and the text view adds nothing for that model.
+
 ### Preflight
 
 `ask-agent preflight [--json]` checks the installed and latest CLI versions for enabled agents, refreshes the model catalog, and reports model counts by status, the lowest known quota per agent, and benchmark cache freshness. Missing or failed version lookups show `unknown`; benchmark freshness is checked locally, with no benchmark download. Without benchmark configuration, it shows `not configured`.
@@ -112,7 +122,7 @@ Preflight reports configured update commands for outdated agents but never runs 
 
 ### Choosing the model per task
 
-`-a AGENT -m MODEL` checks the model before the agent starts. When `catalog.json` (written by `ask-agent catalog`) lists the agent, only models it marks `usable` or `unverified` run; otherwise the agent's config `models` decide, and an agent without `models` accepts any model. A refused model exits 2 with `model MODEL is not usable for agent AGENT (REASON)` and records no run.
+`-a AGENT -m MODEL` checks the model before the agent starts. When `catalog.json` (written by `ask-agent catalog`) lists the agent, only models it marks `usable` or `unverified` run; otherwise the agent's config `models` decide, and an agent without `models` accepts any model. A refused model exits 2 with `model MODEL is not usable for agent AGENT (REASON)` and records no run. A model missing from a catalog the agent's own CLI wrote triggers one refresh of that agent first (`catalog refreshed for AGENT: MODEL is usable`), so a model released after the last refresh is not refused. Fallback agents (`fallback` in config) that cannot run the requested model are skipped with `skip AGENT: model MODEL is not usable (REASON)` instead of being run with it.
 
 The `claude` agent (Claude Code in print mode) is enabled for explicit use only: `-a claude -m haiku|sonnet|opus`. It is in no tier or role, so nothing routes to it by default, but `status` and the status line now list it as ready. It shares the orchestrator's quota (`shares_quota_with`).
 

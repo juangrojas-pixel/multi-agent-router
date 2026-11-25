@@ -54,8 +54,9 @@ const listed = { source: "cli", models: [
 ] };
 const calls = ["version", "latest", "models"];
 
-for (const [latest, status, exit] of [["1.9.0", "current", 0], ["1.10.0", "outdated", 3]] as const) {
-  test(`preflight ${status}, reporting only`, (t) => {
+// An installed version newer than the registry's latest (a prerelease or a lagging registry) is not behind.
+for (const [latest, status, exit] of [["1.9.0", "current", 0], ["1.10.0", "outdated", 3], ["1.8.5", "current", 0]] as const) {
+  test(`preflight ${status} with latest ${latest}, reporting only`, (t) => {
     const s = setup(t, { agents: { one: agent, disabled: { ...agent, enabled: false } } });
     assert.deepEqual(runCli(["preflight"], { ...s.env, STUB_LATEST: latest }), {
       status: exit, stderr: "", stdout: `one  version 1.9.0 (latest ${latest}, ${status})\n${modelsLine}` +

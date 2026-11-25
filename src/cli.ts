@@ -4,7 +4,7 @@ import { guidance } from "./guidance.ts";
 import { listRoles, resolveRole, runRole, type RoleEntry } from "./roles.ts";
 import { agyUsage, attempt, available, commandExists, modelProblem, runParallel, setBackendFlag, setRunContext } from "./run.ts";
 import { clearCooldown, jqText, runsFile, runsTable } from "./state.ts";
-import { catalogCommand } from "./catalog.ts";
+import { buildCatalog, catalogCommand } from "./catalog.ts";
 import { preflightCommand } from "./preflight.ts";
 
 const original = process.argv.slice(2);
@@ -214,7 +214,13 @@ if (agents) {
   const named = parallel ? agents.split(",").filter(Boolean) : agents.split(",");
   for (const id of named) if (!config.agents[id]) fail(`error: unknown agent: ${id}`);
   for (const id of named) {
-    const problem = modelProblem(id, config, model);
+    let problem = modelProblem(id, config, model);
+    // A model released after the last catalog refresh: list that agent again once before refusing.
+    if (problem === "not in catalog" && config.agents[id].list_models) {
+      await buildCatalog(config, { refresh: true, agent: id });
+      problem = modelProblem(id, config, model);
+      if (!problem) log(`catalog refreshed for ${id}: ${model} is usable`);
+    }
     if (problem) fail(`model ${model} is not usable for agent ${id} (${problem})`);
   }
   candidates = [];
@@ -240,7 +246,14 @@ if (parallel) {
   if (!(await runParallel(ready, config, prompt, model, tier))) fail("error: no agent could answer");
   process.exit(0);
 }
+const namedAgents = agents ? agents.split(",") : [];
 for (const id of candidates) {
+  // A fallback the requested model cannot run on is skipped; named agents were checked above.
+  const modelReason = agents && !namedAgents.includes(id) ? modelProblem(id, config, model) : null;
+  if (modelReason) {
+    log(`skip ${id}: model ${model} is not usable (${modelReason})`);
+    continue;
+  }
   const reason = available(id, config);
   if (reason) {
     log(`skip ${id}: ${reason}`);

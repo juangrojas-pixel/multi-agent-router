@@ -197,3 +197,31 @@ test("a config-sourced empty catalog entry does not block -m on an agent without
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "--model\nanything\nhello\n");
 });
+
+test("a model missing from the cached catalog refreshes that agent once before refusing", () => {
+  const list = (models: string) => ({ cmd: [fixture("stub-models"), "models", models], parse: "lines-first-field" });
+  const config = argvConfig({ models: undefined, list_models: list("m-small\nm-new\n") });
+  const s = scratchConfig(config);
+  writeCatalog(s.root, { agents: { argv: { fetched_at: "2026-11-24T00:00:00.000Z", source: "cli", models: [{ id: "m-small", status: "usable" }] } } });
+  const ok = runCli(["-a", "argv", "-m", "m-new", "hello"], s.env);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.stdout, "--model\nm-new\nhello\n");
+  assert.match(ok.stderr, /catalog refreshed for argv: m-new is usable/);
+  const cached = JSON.parse(readFileSync(join(s.root, "cache", "multi-agent-router", "catalog.json"), "utf8"));
+  assert.deepEqual(cached.agents.argv.models.map((m: { id: string }) => m.id).sort(), ["m-new", "m-small"]);
+  const ghost = runCli(["-a", "argv", "-m", "m-ghost", "hello"], s.env);
+  assert.equal(ghost.status, 2);
+  assert.equal(ghost.stderr, "[ask-agent] model m-ghost is not usable for agent argv (not in catalog)\n");
+});
+
+test("a fallback agent that cannot run the requested model is skipped, not run", () => {
+  const config = baseConfig() as AnyConfig;
+  config.agents.f = { enabled: true, command: fixture("stub-fail"), timeout_seconds: 1, models: ["m1"], fallback: ["g"], args: ["{prompt}"], output: "text" };
+  config.agents.g = { enabled: true, command: fixture("stub-argv"), timeout_seconds: 1, models: ["m2"], args: ["{model_args}", "{prompt}"], model_args: ["--model", "{model}"], output: "text" };
+  const s = scratchConfig(config);
+  const result = runCli(["-a", "f", "-m", "m1", "hello"], s.env);
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /\[ask-agent\] skip g: model m1 is not usable \(not in agents\.g\.models\)\n/);
+  assert.deepEqual(runs(s.root).map((row) => row.agent), ["f"]);
+});

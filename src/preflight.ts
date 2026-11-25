@@ -27,7 +27,8 @@ function compareVersions(installed: string, latest: string): number {
 async function versionReport(agent: Agent) {
   const [installed, latest] = await Promise.all([readVersion(agent.version_cmd), readVersion(agent.latest_cmd)]);
   const comparison = installed && latest ? compareVersions(installed, latest) : null;
-  const status = comparison === 0 ? "current" : comparison === -1 ? "outdated" : "unknown";
+  // Newer than the registry's latest (a prerelease, or a registry that lags) is not behind.
+  const status = comparison === null ? "unknown" : comparison === -1 ? "outdated" : "current";
   return { installed, latest, status, update_cmd: agent.update_cmd ?? null };
 }
 

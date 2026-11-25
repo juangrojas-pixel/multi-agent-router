@@ -70,3 +70,26 @@ test("a nested -r call is still refused", () => {
   assert.equal(result.status, 2);
   assert.match(result.stderr, /nested call refused/);
 });
+
+test("with the dispatcher configured, guidance explains choosing agent and model per task", () => {
+  const s = scratchConfig(config({
+    capability_tiers: ["light", "standard", "strong", "frontier"],
+    kinds: ["code", "writing"],
+    routing: { notes: "Secrets stay inline." },
+  }));
+  const result = runCli(["guidance"], s.env);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, [
+    ...roleLines,
+    "",
+    "Choose agent and model per task with evidence (roles stay the default):",
+    "1. Before a plan: `ask-agent preflight` (versions, quotas, usable models).",
+    "2. Per task: `ask-agent candidates --kind <code|writing> --tier <light|standard|strong|frontier> --size <s|m|l>` lists capable agent/model pairs, cheapest first. Pick the cheapest that is good enough.",
+    "3. Run it and record why: `ask-agent -a <agent> -m <model> --task <id> --reason \"<why>\" -C <dir> \"<task>\"`.",
+    "4. Distinct tasks at the same time: `ask-agent dispatch -f <batch.json>`, one receipt per task.",
+    "5. Client servers, cloud or databases: only agents allowed for client work (`candidates --client`).",
+    "",
+    "Secrets stay inline.",
+    "",
+  ].join("\n"));
+});

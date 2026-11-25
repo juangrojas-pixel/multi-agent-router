@@ -47,6 +47,8 @@ ask-agent config                         # merged config (agents.json + private 
 }
 ```
 
+The shipped `docs` role lists `opencode` first because its free models cost nothing for low-stakes text; agy follows as the fallback when opencode is out of quota or fails.
+
 `-r ROLE` (or `--role ROLE`) runs the task on the role's agents in order. An entry that is disabled, not installed or in cooldown is skipped; one that hits a quota error (which also sets its cooldown), times out, fails or answers nothing hands the task to the next. Each step prints `[ask-agent] role NAME: AGENT failed (REASON), trying NEXT` on stderr; when no entry can answer, the last line is `[ask-agent] role NAME: no agent could run` and the exit status is 2. Per-agent `fallback` lists apply to `-a` only, never to roles. It cannot be combined with `-a`, `-t` or `-m` (exit 2). An unknown role exits 2 with `unknown role: NAME (configured: ...)`; a config without roles exits 2 with `no roles configured`. Role runs record `role` in `runs.jsonl` (empty for `-a` and `-t` runs).
 
 `roles` prints one tab-separated line per role entry: `role agent model effort ready reason`, with `-` for an unset model or effort, `ready` `yes` or `no`, and `reason` `disabled`, `not installed` or `cooldown until HH:MM`. It never starts an agent (agy's quota is not queried). When `orchestrator` is set, the first line is `orchestrator AGENT`. Exit 0 even when entries are not ready.

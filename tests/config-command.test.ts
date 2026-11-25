@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fixture, runCli, scratchConfig } from "./fixtures/helpers.ts";
+import { baseConfig, fixture, runCli, scratchConfig } from "./fixtures/helpers.ts";
 
 function config(): object {
   return {
@@ -70,4 +70,13 @@ test("--help lists the config command", () => {
   const s = scratchConfig(config());
   const result = runCli(["--help"], s.env);
   assert.match(result.stdout, /ask-agent config\s+/);
+});
+
+test("config prints large output whole through a pipe", () => {
+  const config = baseConfig() as { agents: Record<string, Record<string, unknown>> };
+  config.agents.one.description = "x".repeat(300_000);
+  const s = scratchConfig(config);
+  const result = runCli(["config"], s.env);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).agents.one.description.length, 300_000);
 });

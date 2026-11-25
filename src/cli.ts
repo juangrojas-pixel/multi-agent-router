@@ -14,6 +14,12 @@ const NESTED = "error: nested call refused: ask-agent is already running an agen
 
 function log(message: string): void { process.stderr.write(`[ask-agent] ${message}\n`); }
 function fail(message: string): never { log(message); process.exit(2); }
+// Exits after stdout drains: process.exit() drops writes still queued on a pipe, which cut
+// large outputs such as `catalog --json` or `config` short for readers like jq or route-hint.
+async function exit(code: number): Promise<never> {
+  await new Promise<void>((resolve) => process.stdout.write("", () => resolve()));
+  process.exit(code);
+}
 
 // Commands the bash router owned before the port keep its checks and messages on a missing config.
 const bashCommands = ["parallel", "status", "reset", "runs"].includes(original[0] ?? "");
@@ -43,17 +49,17 @@ if (policy) {
 
 if (original[0] === "roles") {
   process.stdout.write(listRoles(config));
-  process.exit(0);
+  await exit(0);
 }
 if (original[0] === "guidance") {
   process.stdout.write(guidance(config));
-  process.exit(0);
+  await exit(0);
 }
 // The merged config (agents.json with the private policy over it), for readers outside the
 // router such as bin/route-hint and the adapters.
 if (original[0] === "config") {
   process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
-  process.exit(0);
+  await exit(0);
 }
 if (process.env.ASK_AGENT_DEPTH) fail(NESTED);
 
@@ -86,16 +92,16 @@ function status(): number {
   return 0;
 }
 
-if (original[0] === "status") process.exit(status());
-if (original[0] === "catalog") process.exit(await catalogCommand(config, original.slice(1)));
-if (original[0] === "preflight") process.exit(await preflightCommand(config, original.slice(1)));
-if (original[0] === "candidates") process.exit(await candidatesCommand(config, original.slice(1)));
-if (original[0] === "dispatch") process.exit(await dispatchCommand(config, original.slice(1)));
+if (original[0] === "status") await exit(status());
+if (original[0] === "catalog") await exit(await catalogCommand(config, original.slice(1)));
+if (original[0] === "preflight") await exit(await preflightCommand(config, original.slice(1)));
+if (original[0] === "candidates") await exit(await candidatesCommand(config, original.slice(1)));
+if (original[0] === "dispatch") await exit(await dispatchCommand(config, original.slice(1)));
 if (original[0] === "reset") {
   const agent = original[1] ?? "";
   clearCooldown(agent);
   log(`cooldown cleared ${agent || "for all agents"}`);
-  process.exit(0);
+  await exit(0);
 }
 if (original[0] === "runs") {
   const usage = "error: usage: ask-agent runs [N] [-a AGENT]";
@@ -113,7 +119,7 @@ if (original[0] === "runs") {
   const table = runsTable(limit, agent);
   if (table === null) log(`no runs recorded yet (${runsFile()})`);
   else process.stdout.write(table);
-  process.exit(0);
+  await exit(0);
 }
 
 const parallel = original[0] === "parallel";
@@ -179,7 +185,7 @@ for (let index = 0; index < args.length; index += 1) {
       "--backend hc|herdr|live|subprocess: run agents in live hc terminals, in Herdr panes, as interactive TUIs (live) or as plain subprocesses.",
       "",
     ].join("\n"));
-    process.exit(0);
+    await exit(0);
   } else if (argument.startsWith("-")) fail(`error: unknown option: ${argument}`);
   else {
     prompt = args.slice(index).join(" ");
@@ -213,7 +219,7 @@ if (!prompt.trim()) fail("error: empty prompt");
 if (parallel) changeDir();
 
 setRunContext(taskId, reason);
-if (role) process.exit((await runRole(config, role, roleEntries, prompt)) ? 0 : 2);
+if (role) await exit((await runRole(config, role, roleEntries, prompt)) ? 0 : 2);
 
 let candidates: string[];
 if (agents) {
@@ -243,7 +249,7 @@ if (agents) {
   candidates = config.tiers[selectedTier];
 }
 
-if (candidates.length === 0) process.exit(2);
+if (candidates.length === 0) await exit(2);
 if (parallel) {
   const ready = candidates.filter((id) => {
     const reason = available(id, config);
@@ -252,7 +258,7 @@ if (parallel) {
   });
   if (ready.length === 0) fail(`error: no agent ready (checked: ${candidates.join(" ")})`);
   if (!(await runParallel(ready, config, prompt, model, tier))) fail("error: no agent could answer");
-  process.exit(0);
+  await exit(0);
 }
 const namedAgents = agents ? agents.split(",") : [];
 for (const id of candidates) {
@@ -269,6 +275,6 @@ for (const id of candidates) {
   }
   const answered = await attempt(id, config, prompt, model, tier,
     (text) => { process.stdout.write(text); }, (text) => { process.stderr.write(text); });
-  if (answered) process.exit(0);
+  if (answered) await exit(0);
 }
 fail(`error: no agent could answer (tried: ${candidates.join(" ")})`);

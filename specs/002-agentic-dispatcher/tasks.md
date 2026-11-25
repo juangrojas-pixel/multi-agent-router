@@ -109,6 +109,11 @@ assert output, exit code and persisted state.
 
 ---
 
+## Phase 8b: US7 - See every delegated agent in Herdr (P2)
+
+- [ ] T030 [US7] Failing tests in `tests/herdr-backend.test.ts` with a stub `herdr` (records calls, serves JSON): split `--current --direction right --cwd <cwd> --no-focus`, `pane rename`, `report-agent --state working`, `pane run`, result parity with subprocess (stdout, stderr, exit), pane closed after success and kept after failure, timeout sends ctrl+c and returns 142, fallback to subprocess when `HERDR_ENV` is unset or the split fails
+- [ ] T031 [US7] Implement `src/herdr.ts` (`herdrRun`) mirroring `src/hc.ts`; select it in `backendFor` in `src/run.ts`; accept `--backend herdr` in `src/cli.ts`; README section
+
 ## Phase 9: Polish & cross-cutting
 
 - [ ] T026 Update `src/guidance.ts`: flow preflight -> catalog -> candidates -> dispatch, record `--task`/`--reason`, client-environment restriction kept; failing test first in `tests/guidance.test.ts`

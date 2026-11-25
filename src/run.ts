@@ -3,6 +3,7 @@ import { accessSync, constants } from "node:fs";
 import { buildAgent, commandArgs, parseMeta, parseOutput } from "./agents.ts";
 import type { Config } from "./config.ts";
 import { hcRun, type ProcessResult } from "./hc.ts";
+import { herdrRun } from "./herdr.ts";
 import { changedFiles, cooldown, gitSnapshot, readCache, record, setCooldown } from "./state.ts";
 
 // A refusal of one model (not the agent's quota): that run fails, the agent stays available.
@@ -181,9 +182,13 @@ async function execute(
   const args = commandArgs(id, agent, task, model, effort);
   const subprocess = () => runProcess(agent.command, args, timeoutSeconds);
   const hc = (config as Config & { hc_command?: string }).hc_command || "hc";
-  const result = backendFor(id, config) === "hc"
+  const backend = backendFor(id, config);
+  const herdr = (config as Config & { herdr_command?: string }).herdr_command || "herdr";
+  const result = backend === "hc"
     ? await hcRun(hc, id, agent.command, args, timeoutSeconds, subprocess)
-    : await subprocess();
+    : backend === "herdr"
+      ? await herdrRun({ herdr, agentId: id, model, task: runContext.task, command: agent.command, args, timeoutSeconds }, subprocess)
+      : await subprocess();
   const seconds = Math.floor((Date.now() - started) / 1000);
   const output = `${result.stdout}${result.stderr}`;
   // The bash router's view of the output: stdout, a newline, stderr, trailing newlines dropped.
@@ -210,6 +215,7 @@ async function execute(
       ...(meta.tokens_in !== undefined ? { tokens_in: meta.tokens_in, tokens_out: meta.tokens_out } : {}),
       ...(runContext.task ? { task_id: runContext.task } : {}),
       ...(runContext.reason ? { reason: runContext.reason } : {}),
+      ...(process.env.ASK_AGENT_BATCH_ID ? { batch_id: process.env.ASK_AGENT_BATCH_ID } : {}),
     },
   );
   // The cooldown is written by the caller after it logs the quota error, as the bash router does.

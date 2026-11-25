@@ -45,7 +45,7 @@ Runs a batch (see data-model DispatchBatch). Validates all tasks before starting
 unknown agent or role, model not usable for that agent, overlapping `writes`, a `client: true`
 task naming an agent outside policy `client_agents`. Then runs up to
 `dispatch.concurrency` at once; a failing task falls back by its role order (agent tasks: no
-fallback unless `fallback: true` uses the agent's tier order).
+fallback unless `fallback: true`, which uses the agent's config `fallback` list, as `-a` does).
 Output: one `### <task_id> (<agent>/<model>)` block per task with its receipt, in task order;
 `--json` prints `[Receipt]`.
 Exit: 0 all tasks succeeded; 5 some failed (others still returned); 2 validation error before

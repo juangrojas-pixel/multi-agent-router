@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Fake herdr for tests: records every call (one line, args joined by |) and acts like a pane.
+printf '%s\n' "$(IFS='|'; echo "$*")" >> "$HERDR_CALLS"
+case "$1 $2" in
+  "pane split")
+    if [[ "${HERDR_FAIL_SPLIT:-}" == 1 ]]; then echo '{"error":{"code":"no_space"}}' >&2; exit 1; fi
+    echo '{"result":{"pane":{"pane_id":"w1:p9"}}}' ;;
+  "pane run") setsid bash -c "$4" </dev/null >/dev/null 2>&1 & echo '{"result":{}}' ;;
+  *) echo '{"result":{}}' ;;
+esac

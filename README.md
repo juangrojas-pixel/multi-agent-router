@@ -139,6 +139,17 @@ The `claude` agent (Claude Code in print mode) is enabled for explicit use only:
 
 `changed_files` lists the paths of the run's git repo that changed during the run: new or different `git status` entries plus files in commits made during the run. It is empty outside a git repo. A file that was already modified before the run and is modified again does not show up. `last/<agent>.json` still keeps the latest run of each agent.
 
+### herdr backend (see agents in Herdr)
+
+`--backend herdr` (or `backend: "herdr"` in `agents.json`, globally or per agent) runs each agent in a sibling pane of the Herdr pane the orchestrator runs in, so you watch it work and it shows in Herdr's sidebar. Per run the router:
+
+- splits the calling pane to the right without taking focus (`herdr pane split --current --direction right --cwd <cwd> --no-focus`);
+- labels the pane `<agent> <task or model>` and reports the agent `working` (`herdr pane report-agent --source ask-agent`);
+- runs the agent there with its arguments read from a file (the prompt never goes through the pane's command line) and returns the same stdout, stderr, exit code, quota detection and timeout as a subprocess run;
+- on success releases the agent and closes the pane; on failure reports it `idle` with `failed (exit N)` and leaves the pane open to read; on timeout sends `ctrl+c` and returns the timeout result.
+
+It needs the orchestrator itself inside a Herdr pane (`HERDR_ENV=1`): from another machine, attach to a Herdr session on this host (`herdr --remote <ssh-alias>`) rather than a plain SSH pane. Outside Herdr, or when the split is refused, the run falls back to a subprocess and logs `herdr unavailable (...), falling back to subprocess`. `herdr_command` sets the binary (default `herdr`).
+
 ### hc backend (herdr-core)
 
 `--backend hc` runs each agent inside a live [hc](https://herdr.dev) terminal instead of a plain subprocess. While it works, `hc attach aa-<agent>-<pid>` (printed on stderr) shows the agent live; `ctrl+\` detaches. The answer, stderr, exit code, quota detection and per-agent timeout behave exactly like the subprocess backend, and the terminal is removed when the run ends.

@@ -149,7 +149,7 @@ for (let index = 0; index < args.length; index += 1) {
   else if (argument === "--reason") reason = optionValue(index++);
   else if (argument === "--backend") {
     const backend = args[++index] ?? "";
-    if (backend !== "hc" && backend !== "subprocess") fail(`error: unknown backend: ${backend} (use hc or subprocess)`);
+    if (backend !== "hc" && backend !== "herdr" && backend !== "subprocess") fail(`error: unknown backend: ${backend} (use hc, herdr or subprocess)`);
     setBackendFlag(backend);
   } else if (argument === "-h" || argument === "--help") {
     process.stdout.write([
@@ -176,7 +176,7 @@ for (let index = 0; index < args.length; index += 1) {
       "  cannot be combined with -a, -t or -m.",
       "Agent keys: args, model_args, effort_args, output, models, effort_levels (see README).",
       "The config is checked before any command; a mistake exits 2 naming its key.",
-      "--backend hc|subprocess: run agents in live hc terminals or as plain subprocesses.",
+      "--backend hc|herdr|subprocess: run agents in live hc terminals, in Herdr panes or as plain subprocesses.",
       "",
     ].join("\n"));
     process.exit(0);
@@ -231,7 +231,9 @@ if (agents) {
   }
   candidates = [];
   for (const id of named) {
-    for (const candidate of [id, ...(config.agents[id].fallback ?? [])]) {
+    // ASK_AGENT_NO_FALLBACK=1 (set by dispatch for tasks without `fallback: true`) runs only the named agent.
+    const fallbacks = process.env.ASK_AGENT_NO_FALLBACK ? [] : (config.agents[id].fallback ?? []);
+    for (const candidate of [id, ...fallbacks]) {
       if (!candidates.includes(candidate)) candidates.push(candidate);
     }
   }

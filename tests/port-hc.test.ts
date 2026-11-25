@@ -124,7 +124,7 @@ test("role and parallel runs use the hc backend too", () => {
 test("--backend rejects other values like the bash router", () => {
   const s = setup();
   assert.deepEqual(runCli(["--backend", "nope", "-a", "one", "PING"], s.env),
-    { stdout: "", stderr: "[ask-agent] error: unknown backend: nope (use hc or subprocess)\n", status: 2 });
+    { stdout: "", stderr: "[ask-agent] error: unknown backend: nope (use hc, herdr or subprocess)\n", status: 2 });
   assert.deepEqual(runCli(["--backend"], s.env),
-    { stdout: "", stderr: "[ask-agent] error: unknown backend:  (use hc or subprocess)\n", status: 2 });
+    { stdout: "", stderr: "[ask-agent] error: unknown backend:  (use hc, herdr or subprocess)\n", status: 2 });
 });

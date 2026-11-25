@@ -165,6 +165,30 @@ shows those scores for the mapped models, the source and the date.
 3. **Given** a usable model has no benchmark data, **When** shown in the catalog, **Then**
    its tier comes from config and is marked as declared, not measured.
 
+### User Story 7 - See every delegated agent in Herdr (Priority: P2)
+
+When the orchestrator runs inside a Herdr pane and sends a task to another agent, that agent
+runs in a sibling Herdr pane that shows its live output and appears in Herdr's sidebar with its
+name, model and state (working, then done or failed). User words: "quiero poder tambien ver al
+lado izquierdo cuando claude manda otro agente".
+
+**Why this priority**: the user watches the swarm work; hidden subprocesses give no feedback.
+
+**Independent Test**: with a stub `herdr` binary that records its calls, a run with the herdr
+backend splits a pane, labels it, reports the agent working, runs the agent in it, reports it
+done, and returns the same stdout and exit code as the subprocess backend.
+
+**Acceptance Scenarios**:
+
+1. **Given** the router runs inside Herdr (`HERDR_ENV=1`) with backend `herdr`, **When** a task
+   runs, **Then** a sibling pane opens without taking focus, is labeled `<agent> <task or model>`,
+   and the agent is reported `working` to Herdr until the run ends.
+2. **Given** the run ends, **Then** the answer, stderr, exit code, quota detection and timeout
+   behave exactly as with the subprocess backend; the pane closes after success and stays open
+   after a failure so the user can read it.
+3. **Given** the router is not inside Herdr or Herdr refuses the split, **When** a task runs,
+   **Then** it falls back to the subprocess backend and logs why.
+
 ### Edge Cases
 
 - An agent's quota runs out mid-swarm: that task falls back by config; the others continue.
@@ -219,6 +243,10 @@ shows those scores for the mapped models, the source and the date.
 - **FR-016**: The orchestrator guidance (`ask-agent guidance`) MUST explain how to use the
   catalog, candidates, preflight and batch dispatch, so any orchestrator can follow it.
 - **FR-017**: Help text and README MUST document every new command and option.
+- **FR-019**: With backend `herdr` inside a Herdr pane, each agent run MUST open a sibling pane
+  (no focus change), label it, report the agent state to Herdr (working, then idle or released),
+  and return the same result as the subprocess backend; outside Herdr it MUST fall back to the
+  subprocess backend and say so.
 - **FR-018**: A batch task marked as client work MUST run only on agents the private policy
   allows for client work; a batch naming any other agent for such a task MUST be rejected
   before any agent starts, and candidates for client work MUST list only allowed agents.

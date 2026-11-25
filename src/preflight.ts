@@ -97,7 +97,7 @@ export async function preflightCommand(config: Config, args: string[]): Promise<
   const enabled = Object.entries(config.agents).filter(([, agent]) => agent.enabled === true);
   const updates = update ? await updateOutdated(enabled) : null;
   const [catalog, versions] = await Promise.all([
-    buildCatalog(config, { refresh: true, concurrent: true }).catch((error: unknown) => {
+    buildCatalog(config, { refresh: true, concurrent: true, keepCached: true }).catch((error: unknown) => {
       process.stderr.write(`[ask-agent] error: could not refresh catalog: ${String(error)}\n`);
       return null;
     }),

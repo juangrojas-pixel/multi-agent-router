@@ -124,6 +124,16 @@ test("preflight checks five agents concurrently and finishes under 60 seconds", 
   s.checkState(ids.flatMap(() => calls), Object.fromEntries(ids.map((id) => [id, { ...listed, models: listed.models.slice(0, 2) }])));
 });
 
+// An agent CLI that prints no models (seen with `opencode models` on 2026-11-25) is a failed listing:
+// preflight keeps the last listed models instead of caching an empty list.
+test("preflight keeps the cached model list when an agent lists no models", (t) => {
+  const s = setup(t, { agents: { one: agent } });
+  const report = `one  version 1.9.0 (latest 1.9.0, current)\n${modelsLine}benchmarks: not configured\npreflight: ready\n`;
+  assert.deepEqual(runCli(["preflight"], s.env), { status: 0, stderr: "", stdout: report });
+  assert.deepEqual(runCli(["preflight"], { ...s.env, STUB_MODELS_EMPTY: "1" }), { status: 0, stderr: "", stdout: report });
+  s.checkState([...calls, ...calls], { one: listed });
+});
+
 // --update runs update_cmd only for outdated agents, sends their output to stderr, then re-checks.
 // Each agent keeps its own installed version in the stub, so an update reaches only its agent.
 function own(id: string, extra: object = {}) {

@@ -57,6 +57,12 @@ test("discovers enabled agents and isolates missing, failed and timed-out listin
   assert.equal(readFileSync(marker, "utf8"), "models\nfail\nslow\nmodels\n");
 });
 
+test("an agent that lists no models counts as a failed listing", (t) => {
+  const { env } = setup(t, { quiet: { ...agent, models: ["x"], list_models: list("\n") } });
+  const output = json([], env);
+  assert.deepEqual(output, { agents: { quiet: snapshot("config", [unverified("x")], output.agents.quiet) } });
+});
+
 test("targeted refresh merges caches and updates model status from quota and listings", (t) => {
   const { env, cache, marker } = setup(t, {
     agy: { ...agent, models: ["gemini-fast", "opus", "retired"], list_models: { cmd: [stub, "models"], parse: "tsv" },

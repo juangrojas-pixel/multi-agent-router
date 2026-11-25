@@ -8,7 +8,7 @@ case "$1" in
       state="${STUB_MARKER}.installed${2:+.$2}"
       if [[ -f $state ]]; then cat "$state"; else printf '%s\n' "$STUB_INSTALLED"; fi
     else [[ ${STUB_OFFLINE:-0} == 0 ]] && printf '%s\n' "$STUB_LATEST"; fi ;;
-  models) printf '%s\n' 'model-1' 'model-2' ;;
+  models) [[ ${STUB_MODELS_EMPTY:-0} == 1 ]] || printf '%s\n' 'model-1' 'model-2' ;;
   -p) printf '%s\n' '{"command":{"data":{"groups":[{"name":"family","buckets":[{"remaining_fraction":0.75},{"remaining_fraction":0.25}]}]}}}' ;;
   update)
     if [[ ${STUB_UPDATE_FAIL:-0} != 0 ]]; then printf '%s\n' 'update failed: registry down' >&2; exit 4; fi

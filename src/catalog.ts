@@ -29,7 +29,9 @@ async function listModels(list: Agent["list_models"]): Promise<Set<string> | nul
     const { stdout } = await exec(command, args, {
       encoding: "utf8", timeout: (list.timeout_seconds ?? 60) * 1000, killSignal: "SIGKILL",
     });
-    return parseModels(stdout, list.parse);
+    // An empty listing is a failure, not an agent without models: caching it would hide every model.
+    const ids = parseModels(stdout, list.parse);
+    return ids.size ? ids : null;
   } catch {
     return null;
   }

@@ -1,9 +1,23 @@
 {
   "cooldown_seconds": 3600,
   "default_tier": "execute",
-  "capability_tiers": ["light", "standard", "strong", "frontier"],
-  "kinds": ["code", "reasoning", "writing", "review"],
-  "sizes": { "s": 20000, "m": 80000, "l": 250000 },
+  "capability_tiers": [
+    "light",
+    "standard",
+    "strong",
+    "frontier"
+  ],
+  "kinds": [
+    "code",
+    "reasoning",
+    "writing",
+    "review"
+  ],
+  "sizes": {
+    "s": 20000,
+    "m": 80000,
+    "l": 250000
+  },
   "cost_ceiling": 5,
   "model_aliases": {
     "haiku": "claude-haiku-5-5",
@@ -13,20 +27,44 @@
   "benchmarks": {
     "max_age_days": 7,
     "sources": [
-      { "id": "models-dev", "url": "https://models.dev/api.json", "parse": "models-dev" },
+      {
+        "id": "models-dev",
+        "url": "https://models.dev/api.json",
+        "parse": "models-dev"
+      },
       {
         "id": "lmarena",
         "url": "https://datasets-server.huggingface.co/filter?dataset=lmarena-ai/leaderboard-dataset&config=text&split=latest&where=%22category%22%3D%27coding%27%20OR%20%22category%22%3D%27webdev%27%20OR%20%22category%22%3D%27math%27%20OR%20%22category%22%3D%27hard_prompts%27%20OR%20%22category%22%3D%27creative_writing%27%20OR%20%22category%22%3D%27instruction_following%27&offset=0&length=100",
         "parse": "lmarena-hf",
         "categories": {
-          "code": ["coding", "webdev"],
-          "reasoning": ["math", "hard_prompts"],
-          "writing": ["creative_writing", "instruction_following"],
-          "review": ["hard_prompts"]
+          "code": [
+            "coding",
+            "webdev"
+          ],
+          "reasoning": [
+            "math",
+            "hard_prompts"
+          ],
+          "writing": [
+            "creative_writing",
+            "instruction_following"
+          ],
+          "review": [
+            "hard_prompts"
+          ]
         },
-        "tier_bands": { "frontier": 5, "strong": 15, "standard": 40 }
+        "tier_bands": {
+          "frontier": 5,
+          "strong": 15,
+          "standard": 40
+        }
       },
-      { "id": "openrouter", "url": "https://openrouter.ai/api/v1/models", "parse": "openrouter", "role": "fallback" }
+      {
+        "id": "openrouter",
+        "url": "https://openrouter.ai/api/v1/models",
+        "parse": "openrouter",
+        "role": "fallback"
+      }
     ]
   },
   "tiers": {
@@ -307,5 +345,15 @@
       }
     ]
   },
-  "prompt_preamble": "You are a read-only advisor called by another agent. Answer by reading files only: do not run shell commands, do not run tests, do not modify anything. Be concise and finish within a few minutes; an incomplete answer is better than none."
+  "prompt_preamble": "You are a read-only advisor called by another agent. Answer by reading files only: do not run shell commands, do not run tests, do not modify anything. Be concise and finish within a few minutes; an incomplete answer is better than none.",
+  "models": {
+    "gpt-6-2-sol": {
+      "tier": {
+        "code": "strong",
+        "reasoning": "strong",
+        "review": "strong"
+      },
+      "note": "Declared by the user (2026-11-25): LMArena ranks it 109 in coding (chat preference) and FrontierSWE has no gpt-6.2-sol entry; gpt-6-astra, same family, is #2 on FrontierSWE."
+    }
+  }
 }

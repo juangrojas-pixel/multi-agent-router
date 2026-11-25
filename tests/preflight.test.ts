@@ -125,22 +125,27 @@ test("preflight checks five agents concurrently and finishes under 60 seconds", 
 });
 
 // --update runs update_cmd only for outdated agents, sends their output to stderr, then re-checks.
-const noLatest = { ...agent, latest_cmd: null };
+// Each agent keeps its own installed version in the stub, so an update reaches only its agent.
+function own(id: string, extra: object = {}) {
+  return { ...agent, version_cmd: [stub, "version", id], update_cmd: `${stub} update ${id}`, ...extra };
+}
+const otherModels = (id: string) => ({ ...listed, models: [listed.models[0], listed.models[1], { ...listed.models[2], reason: `not listed by ${id}` }] });
+
 for (const fail of [false, true]) {
   test(`preflight --update ${fail ? "reports a failed update and stays outdated" : "updates outdated agents and re-checks"}`, (t) => {
-    const s = setup(t, { agents: { one: agent, two: noLatest } });
+    const s = setup(t, { agents: { one: own("one"), two: own("two", { latest_cmd: null }) } });
     const result = runCli(["preflight", "--update"], { ...s.env, STUB_LATEST: "1.10.0", STUB_UPDATE_FAIL: fail ? "1" : "0" });
     const version = fail ? "1.9.0 (latest 1.10.0, outdated)" : "1.10.0 (latest 1.10.0, current)";
     assert.deepEqual(result, {
       status: fail ? 3 : 0,
-      stderr: `[ask-agent] updating one: ${update}\n` +
+      stderr: `[ask-agent] updating one: ${stub} update one\n` +
         (fail ? "update failed: registry down\n[ask-agent] update of one failed (exit 4)\n" : "installed 1.10.0\n[ask-agent] updated one\n"),
-      stdout: `one  version ${version}\n${modelsLine}` + (fail ? `  update: ${update}\n` : "") +
-        `two  version ${fail ? "1.9.0" : "1.10.0"} (latest unknown, unknown)\n${modelsLine}` +
+      stdout: `one  version ${version}\n${modelsLine}` + (fail ? `  update: ${stub} update one\n` : "") +
+        `two  version 1.9.0 (latest unknown, unknown)\n${modelsLine}` +
         `benchmarks: not configured\npreflight: ${fail ? "outdated" : "ready"}\n`,
     });
-    s.checkState(["version", "latest", "version", "update", "version", "latest", "version", "models", "models"],
-      { one: listed, two: { ...listed, models: [listed.models[0], listed.models[1], { ...listed.models[2], reason: "not listed by two" }] } });
+    s.checkState(["version one", "latest", "version two", "update one", "version one", "latest", "version two", "models", "models"],
+      { one: listed, two: otherModels("two") });
   });
 }
 
@@ -159,4 +164,31 @@ test("preflight --update with everything current runs no update", (t) => {
   assert.deepEqual(runCli(["preflight", "--update"], s.env), { status: 0, stderr: "",
     stdout: `one  version 1.9.0 (latest 1.9.0, current)\n${modelsLine}benchmarks: not configured\npreflight: ready\n` });
   s.checkState(["version", "latest", ...calls], { one: listed });
+});
+
+test("preflight --update names an outdated agent without update_cmd and skips it", (t) => {
+  const s = setup(t, { agents: { one: { ...agent, update_cmd: undefined } } });
+  const result = runCli(["preflight", "--json", "--update"], { ...s.env, STUB_LATEST: "1.10.0" });
+  assert.equal(result.status, 3);
+  assert.equal(result.stderr, "[ask-agent] one is outdated but has no update_cmd\n");
+  assert.deepEqual(JSON.parse(result.stdout).updates, {});
+  s.checkState(["version", "latest", ...calls], { one: listed });
+});
+
+test("preflight --update exits 3 when an update fails even if the agent reads current", (t) => {
+  const s = setup(t, { agents: { one: own("one", { update_cmd: `${stub} update one; exit 5` }) } });
+  const result = runCli(["preflight", "--update"], { ...s.env, STUB_LATEST: "1.10.0" });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /update of one failed \(exit 5\)/);
+});
+
+test("preflight --update kills a hung update with its whole process group and says it timed out", async (t) => {
+  const s = setup(t, { agents: { one: agent } });
+  const result = runCli(["preflight", "--json", "--update"], { ...s.env, STUB_LATEST: "1.10.0", STUB_UPDATE_HANG: "1",
+    ASK_AGENT_UPDATE_TIMEOUT_MS: "300" });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /update of one timed out after 0\.3 s/);
+  assert.deepEqual(JSON.parse(result.stdout).updates, { one: { command: update, exit: 124, timed_out: true } });
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  assert.equal(existsSync(join(s.env.STUB_MARKER!, "..", "calls.late")), false, "a descendant of the update outlived the timeout");
 });

@@ -43,19 +43,34 @@ function benchmarkStatus(config: Config["benchmarks"]) {
   return timestamps.some((time) => time < cutoff) ? "stale" : "fresh";
 }
 
-// Runs one update command through the shell. Its output goes to stderr so --json stdout stays parseable.
-function runUpdate(command: string): Promise<number> {
+type UpdateResult = { command: string; exit: number; timed_out?: true };
+
+// Runs one update command through the shell, in its own process group so a timeout or Ctrl-C
+// kills every process it started, not only `sh`. Output goes to stderr so --json stdout stays parseable.
+function runUpdate(command: string, timeoutMs: number): Promise<UpdateResult> {
   return new Promise((resolve) => {
-    const child = spawn("sh", ["-c", command], { stdio: ["ignore", 2, 2], timeout: 600_000, killSignal: "SIGKILL" });
-    child.on("error", () => resolve(127));
-    child.on("close", (code) => resolve(code ?? 1));
+    const child = spawn("sh", ["-c", command], { stdio: ["ignore", 2, 2], detached: true });
+    const killGroup = () => { try { process.kill(-child.pid!, "SIGKILL"); } catch { /* already gone */ } };
+    const onSignal = () => { killGroup(); process.exit(130); };
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; killGroup(); }, timeoutMs);
+    process.once("SIGINT", onSignal).once("SIGTERM", onSignal);
+    const done = (exit: number) => {
+      clearTimeout(timer);
+      process.off("SIGINT", onSignal).off("SIGTERM", onSignal);
+      resolve(timedOut ? { command, exit: 124, timed_out: true } : { command, exit });
+    };
+    child.on("error", () => done(127));
+    child.on("close", (code) => done(code ?? 1));
   });
 }
 
 // Updates outdated agents one at a time: package managers share global state and must not race.
 async function updateOutdated(enabled: Array<[string, Agent]>) {
+  // ASK_AGENT_UPDATE_TIMEOUT_MS exists for tests; real updates get 10 minutes each.
+  const timeoutMs = Number(process.env.ASK_AGENT_UPDATE_TIMEOUT_MS) || 600_000;
   const versions = await Promise.all(enabled.map(([, agent]) => versionReport(agent)));
-  const updates: Record<string, { command: string; exit: number }> = {};
+  const updates: Record<string, UpdateResult> = {};
   for (const [i, [id]] of enabled.entries()) {
     const { status, update_cmd } = versions[i];
     if (status !== "outdated") continue;
@@ -64,9 +79,10 @@ async function updateOutdated(enabled: Array<[string, Agent]>) {
       continue;
     }
     process.stderr.write(`[ask-agent] updating ${id}: ${update_cmd}\n`);
-    const exit = await runUpdate(update_cmd);
-    process.stderr.write(exit === 0 ? `[ask-agent] updated ${id}\n` : `[ask-agent] update of ${id} failed (exit ${exit})\n`);
-    updates[id] = { command: update_cmd, exit };
+    const result = await runUpdate(update_cmd, timeoutMs);
+    process.stderr.write(result.timed_out ? `[ask-agent] update of ${id} timed out after ${timeoutMs / 1000} s\n`
+      : result.exit === 0 ? `[ask-agent] updated ${id}\n` : `[ask-agent] update of ${id} failed (exit ${result.exit})\n`);
+    updates[id] = result;
   }
   return updates;
 }
@@ -98,7 +114,8 @@ export async function preflightCommand(config: Config, args: string[]): Promise<
   });
   const benchmarks = benchmarkStatus(config.benchmarks);
   const failed = !catalog || !Object.values(catalog.agents).some((agent) => agent.source === "cli" || agent.models.length);
-  const outdated = benchmarks === "stale" || benchmarks === "missing" || versions.some(({ status }) => status === "outdated");
+  const updateFailed = Object.values(updates ?? {}).some(({ exit }) => exit !== 0);
+  const outdated = updateFailed || benchmarks === "stale" || benchmarks === "missing" || versions.some(({ status }) => status === "outdated");
   if (json) {
     const report = { agents: Object.fromEntries(entries), benchmarks, ...(updates ? { updates } : {}) };
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

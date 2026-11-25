@@ -26,8 +26,9 @@ status, benchmark freshness. Without `--update` it changes nothing.
 
 `--update` first runs `update_cmd` through `sh -c` for each outdated agent, one at a time, with
 the command's output on stderr, then reports as usual. An outdated agent with no `update_cmd` is
-named on stderr and skipped. `--json` adds `updates: {<agent>: {command, exit}}`. A failed update
-leaves that agent outdated, so the exit is 3.
+named on stderr and skipped. Each update gets 10 minutes; on timeout its process group is killed
+and it is reported as `timed out` (exit 124). `--json` adds `updates: {<agent>: {command, exit,
+timed_out?}}`. Any failed or timed-out update makes the exit 3.
 Exit: 0 ready; 3 outdated or stale (names each item and its update command); 1 a check failed;
 2 config error.
 

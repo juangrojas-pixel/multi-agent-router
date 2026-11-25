@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { accessSync, constants } from "node:fs";
-import { buildAgent, commandArgs, parseMeta, parseOutput } from "./agents.ts";
+import { agentEnv, buildAgent, commandArgs, parseMeta, parseOutput } from "./agents.ts";
 import type { Config } from "./config.ts";
 import { hcRun, type ProcessResult } from "./hc.ts";
 import { herdrRun } from "./herdr.ts";
@@ -8,8 +8,10 @@ import { liveRun } from "./live.ts";
 import { changedFiles, cooldown, gitSnapshot, readCache, record, setCooldown } from "./state.ts";
 
 // A refusal of one model (not the agent's quota): that run fails, the agent stays available.
-const modelRefusalPattern = /requires usage credits|switch to another model/i;
-const quotaPattern = /rate.?limit|quota|429|resource.?exhausted|usage limit|too many requests|limit reached/i;
+// Explicit quota/rate-limit wording always wins so real quota exhaustion still sets a cooldown.
+const modelRefusalPattern = /requires usage credits/i;
+const explicitQuotaPattern = /rate.?limit|quota|resource.?exhausted|usage limit|too many requests|limit reached/i;
+const status429Pattern = /429/;
 
 export function commandExists(command: string): boolean {
   if (command.includes("/")) {
@@ -129,7 +131,7 @@ function runProcess(command: string, args: string[], timeoutSeconds: number): Pr
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       detached: true,
-      env: { ...process.env, ASK_AGENT_DEPTH: "1" },
+      env: agentEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -242,8 +244,9 @@ async function execute(
   const outputKind = usedLive ? "text" : built.output;
   const answer = parseOutput(outputKind, result.stdout);
   const meta = parseMeta(outputKind, result.stdout);
-  const modelRefused = modelRefusalPattern.test(output);
-  const quota = !modelRefused && quotaPattern.test(output);
+  const explicitQuota = explicitQuotaPattern.test(output);
+  const modelRefused = !explicitQuota && modelRefusalPattern.test(output);
+  const quota = explicitQuota || (!modelRefused && status429Pattern.test(output));
 
   record(
     id,

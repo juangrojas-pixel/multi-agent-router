@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -eu
+: > "$BARRIER_AGENT"
+for _ in $(seq 1 50); do
+  if [[ -f "$BARRIER_BENCH" ]]; then
+    printf 'model-a\n'
+    exit 0
+  fi
+  sleep 0.02
+done
+exit 1

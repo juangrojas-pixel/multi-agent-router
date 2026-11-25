@@ -223,7 +223,7 @@ if (agents) {
     let problem = modelProblem(id, config, model);
     // A model released after the last catalog refresh: list that agent again once before refusing.
     if (problem === "not in catalog" && config.agents[id].list_models) {
-      await buildCatalog(config, { refresh: true, agent: id });
+      await buildCatalog(config, { refresh: true, agent: id, keepCached: true });
       problem = modelProblem(id, config, model);
       if (!problem) log(`catalog refreshed for ${id}: ${model} is usable`);
     }

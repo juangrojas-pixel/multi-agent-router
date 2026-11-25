@@ -1,4 +1,4 @@
-import { execFile, spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import type { Agent, Config } from "./config.ts";
@@ -20,14 +20,19 @@ const exec = promisify(execFile);
 const cacheName = "catalog.json";
 const usage = "usage: ask-agent catalog [-a AGENT] [--refresh] [--json]";
 
-function listModels(list: Agent["list_models"]): Set<string> | null {
+// Honor the configured timeout (default 60s, SIGKILL) without a lower preflight cap so slow
+// agents (e.g. gentle-shell at 120s) are not cut short.
+async function listModels(list: Agent["list_models"]): Promise<Set<string> | null> {
   if (!list) return null;
   const [command, ...args] = list.cmd;
-  const result = spawnSync(command, args, {
-    encoding: "utf8", timeout: (list.timeout_seconds ?? 60) * 1000,
-  });
-  if (result.error || result.status !== 0) return null;
-  return parseModels(result.stdout, list.parse);
+  try {
+    const { stdout } = await exec(command, args, {
+      encoding: "utf8", timeout: (list.timeout_seconds ?? 60) * 1000, killSignal: "SIGKILL",
+    });
+    return parseModels(stdout, list.parse);
+  } catch {
+    return null;
+  }
 }
 
 function parseModels(stdout: string, parse: string): Set<string> {
@@ -90,24 +95,11 @@ function fetchQuota(command: string): Promise<Map<string, number>> {
   });
 }
 
-async function listForPreflight(list: Agent["list_models"]): Promise<Set<string> | null> {
-  if (!list) return null;
-  const [command, ...args] = list.cmd;
-  try {
-    const { stdout } = await exec(command, args, {
-      encoding: "utf8", timeout: (list.timeout_seconds ?? 60) * 1000, killSignal: "SIGKILL",
-    });
-    return parseModels(stdout, list.parse);
-  } catch {
-    return null;
-  }
-}
-
 async function fetchAgent(id: string, agent: Agent, concurrent: boolean): Promise<AgentCatalog> {
   const checkQuota = id === "agy" && Object.keys(agent.quota_groups ?? {}).length > 0;
   const [listed, fractions] = concurrent
-    ? await Promise.all([listForPreflight(agent.list_models), checkQuota ? fetchQuota(agent.command) : new Map<string, number>()])
-    : [listModels(agent.list_models), checkQuota ? quotaByGroup(agent.command) : new Map<string, number>()];
+    ? await Promise.all([listModels(agent.list_models), checkQuota ? fetchQuota(agent.command) : new Map<string, number>()])
+    : [await listModels(agent.list_models), checkQuota ? await fetchQuota(agent.command) : new Map<string, number>()];
   const patterns = Object.entries(agent.quota_groups ?? {}).map(([glob, group]) => ({
     pattern: new RegExp(`^${glob.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`),
     group,
@@ -172,10 +164,9 @@ export async function catalogCommand(config: Config, args: string[]): Promise<nu
     }
   }
   if (selected !== undefined && !Object.hasOwn(config.agents, selected)) return error(`unknown agent: ${selected}`);
-  const benchmarks = config.benchmarks
-    ? refresh ? await refreshBenchmarks(config) : benchmarkCache(config)
-    : undefined;
-  const result = await buildCatalog(config, { refresh, agent: selected });
+  const [benchmarks, result] = config.benchmarks && refresh
+    ? await Promise.all([refreshBenchmarks(config), buildCatalog(config, { refresh, agent: selected })])
+    : [config.benchmarks ? benchmarkCache(config) : undefined, await buildCatalog(config, { refresh, agent: selected })];
   if (benchmarks) {
     for (const agent of Object.values(result.agents)) {
       for (const model of agent.models) model.profile = profileFor(config, benchmarks, model.id);
@@ -185,21 +176,31 @@ export async function catalogCommand(config: Config, args: string[]): Promise<nu
   return 0;
 }
 
-export async function buildCatalog(config: Config, { refresh, agent: selected, concurrent = false }: {
-  refresh?: boolean; agent?: string; concurrent?: boolean;
+export async function buildCatalog(config: Config, { refresh, agent: selected, concurrent = false, keepCached = false }: {
+  refresh?: boolean; agent?: string; concurrent?: boolean; keepCached?: boolean;
 } = {}): Promise<Catalog> {
   const agents = Object.entries(config.agents).filter(([id, agent]) => agent.enabled === true && (!selected || selected === id));
   const cached = readCache<Catalog>(cacheName)?.agents;
   const entries: [string, AgentCatalog][] = [];
+  let updated = false;
   if (refresh || !cached) {
-    if (concurrent) {
-      entries.push(...await Promise.all(agents.map(async ([id, agent]): Promise<[string, AgentCatalog]> =>
-        [id, await fetchAgent(id, agent, true)])));
-    } else {
-      for (const [id, agent] of agents) entries.push([id, await fetchAgent(id, agent, false)]);
+    const fetched: [string, AgentCatalog][] = concurrent
+      ? await Promise.all(agents.map(async ([id, agent]): Promise<[string, AgentCatalog]> =>
+        [id, await fetchAgent(id, agent, true)]))
+      : [];
+    if (!concurrent) {
+      for (const [id, agent] of agents) fetched.push([id, await fetchAgent(id, agent, false)]);
+    }
+    for (const [id, entry] of fetched) {
+      if (keepCached && entry.source !== "cli" && cached && Object.hasOwn(cached, id) && cached[id].source === "cli") {
+        entries.push([id, cached[id]]);
+      } else {
+        entries.push([id, entry]);
+        updated = true;
+      }
     }
   } else {
-    // Agents enabled after the last refresh are listed now instead of silently left out.
+    // Cached reads still query the CLI and update catalog.json for enabled agents missing from the cache.
     let added = false;
     for (const [id, agent] of agents) {
       if (Object.hasOwn(cached, id)) entries.push([id, cached[id]]);
@@ -208,7 +209,7 @@ export async function buildCatalog(config: Config, { refresh, agent: selected, c
     if (added) writeCache(cacheName, { agents: { ...cached, ...Object.fromEntries(entries) } });
   }
   const result: Catalog = { agents: Object.fromEntries(entries) };
-  if (refresh || !cached) {
+  if ((refresh || !cached) && (!keepCached || updated)) {
     writeCache(cacheName, selected ? { agents: { ...cached, ...result.agents } } : result);
   }
   return result;

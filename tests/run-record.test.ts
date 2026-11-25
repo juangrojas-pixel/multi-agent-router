@@ -243,3 +243,52 @@ test("placeholders written inside the prompt reach the agent literally", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "--model\nm-small\nuse {model}, {prompt} and {timeout} as written\n");
 });
+
+test("a failed refresh on a catalog miss still refuses the model and preserves the cached catalog", () => {
+  const config = argvConfig({ models: undefined, list_models: { cmd: [fixture("stub-models"), "fail"], parse: "tsv" } });
+  const s = scratchConfig(config);
+  const initial = {
+    agents: {
+      argv: { fetched_at: "2026-11-24T00:00:00.000Z", source: "cli", models: [{ id: "m-small", status: "usable" }] },
+      other: { fetched_at: "2026-11-24T00:00:00.000Z", source: "cli", models: [{ id: "x", status: "usable" }] },
+    },
+  };
+  writeCatalog(s.root, initial);
+  const result = runCli(["-a", "argv", "-m", "m-ghost", "hello"], s.env);
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "[ask-agent] model m-ghost is not usable for agent argv (not in catalog)\n");
+  assert.deepEqual(runs(s.root), []);
+  const cached = JSON.parse(readFileSync(join(s.root, "cache", "multi-agent-router", "catalog.json"), "utf8"));
+  assert.deepEqual(cached, initial);
+});
+
+test("quota exhaustion mentioning switch to another model or usage credits still cools the agent down", () => {
+  for (const text of [
+    "Rate limit reached. Switch to another model to continue.",
+    "Usage limit reached. Extra usage requires usage credits.",
+  ]) {
+    const s = scratchConfig(printConfig("claude-json", "sonnet"));
+    const out = JSON.stringify({ type: "result", subtype: "success", is_error: true, api_error_status: 429, result: text });
+    const result = runCli(["-a", "p", "hello"], { ...s.env, STUB_OUTPUT: out });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /\[ask-agent\] p hit a quota\/rate limit:/);
+    assert.match(result.stderr, /\[ask-agent\] p cooled down until /);
+    const cooldown = JSON.parse(readFileSync(join(s.root, "cache", "multi-agent-router", "cooldown.json"), "utf8"));
+    assert.ok(typeof cooldown.p === "number" && cooldown.p > Date.now() / 1000);
+  }
+});
+
+test("router-internal dispatch variables do not reach the agent", () => {
+  const config = baseConfig() as AnyConfig;
+  const s = scratchConfig(config);
+  const script = join(s.root, "print-env");
+  writeFileSync(script, "#!/bin/sh\nenv\n", { mode: 0o755 });
+  config.agents.envy = { enabled: true, command: script, timeout_seconds: 5, args: ["{prompt}"], output: "text" };
+  writeFileSync(s.config, JSON.stringify(config));
+  const result = runCli(["-a", "envy", "hello"], { ...s.env, ASK_AGENT_NO_FALLBACK: "1", ASK_AGENT_BATCH_ID: "b1" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^ASK_AGENT_DEPTH=1$/m);
+  assert.doesNotMatch(result.stdout, /ASK_AGENT_NO_FALLBACK|ASK_AGENT_BATCH_ID/);
+  assert.equal(runs(s.root).at(-1)?.batch_id, "b1");
+});

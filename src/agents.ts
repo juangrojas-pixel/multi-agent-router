@@ -74,3 +74,10 @@ export function parseMeta(kind: BuiltAgent["output"], stdout: string): RunMeta {
   }
   return {};
 }
+
+// The environment an agent runs with: the router's own, marked nested so the agent cannot route
+// back into ask-agent, without the variables dispatch passes only to its child routers.
+export function agentEnv(): NodeJS.ProcessEnv {
+  const { ASK_AGENT_NO_FALLBACK: _noFallback, ASK_AGENT_BATCH_ID: _batch, ...env } = process.env;
+  return { ...env, ASK_AGENT_DEPTH: "1" };
+}

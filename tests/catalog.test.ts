@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
+import { promisify } from "node:util";
 import { fixture, runCli, scratchConfig } from "./fixtures/helpers.ts";
 
 const stub = fixture("stub-models");
@@ -141,4 +145,48 @@ test("a cached catalog still lists an agent enabled after the last refresh", (t)
   assert.deepEqual(Object.keys(catalog.agents).sort(), ["one", "two"]);
   assert.deepEqual(catalog.agents.two.models, [usable("b")]);
   assert.deepEqual(Object.keys(saved(cache).agents).sort(), ["one", "two"]);
+});
+
+test("catalog --refresh runs benchmark refresh and agent listing concurrently", async (t) => {
+  const { root, env } = scratchConfig({ agents: {} });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const benchMarker = join(root, "bench-started");
+  const agentMarker = join(root, "agent-started");
+  const server = createServer((_req, res) => {
+    writeFileSync(benchMarker, "1");
+    let ticks = 0;
+    const poll = setInterval(() => {
+      ticks += 1;
+      if (existsSync(agentMarker)) {
+        clearInterval(poll);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ openai: { models: { "model-a": { cost: { output: 5 } } } } }));
+      } else if (ticks >= 50) {
+        clearInterval(poll);
+        res.writeHead(500);
+        res.end("serial refresh timed out");
+      }
+    }, 20);
+  });
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const { port } = server.address() as AddressInfo;
+  const barrierStub = fixture("p11b-barrier-models");
+  writeFileSync(env.ASK_AGENT_CONFIG!, JSON.stringify({
+    agents: { one: { enabled: true, command: barrierStub, list_models: { cmd: [barrierStub], parse: "tsv" } } },
+    benchmarks: { sources: [{ id: "demo", parse: "models-dev", url: `http://127.0.0.1:${port}/models.json` }] },
+  }));
+  const cli = resolve(import.meta.dirname, "../bin/ask-agent-ts");
+  const { stdout, stderr } = await promisify(execFile)(cli, ["catalog", "--refresh", "--json"], {
+    encoding: "utf8",
+    env: { ...env, BARRIER_BENCH: benchMarker, BARRIER_AGENT: agentMarker },
+  });
+  assert.equal(stderr, "");
+  const output = JSON.parse(stdout);
+  assert.equal(output.agents.one.source, "cli");
+  assert.deepEqual(output.agents.one.models, [{
+    id: "model-a", status: "usable", profile: { tier: {}, tier_source: {}, price_out_per_m: 5 },
+  }]);
+  const benchCache = JSON.parse(readFileSync(join(env.XDG_CACHE_HOME!, "multi-agent-router", "benchmarks.json"), "utf8"));
+  assert.equal(benchCache.sources.demo.status, "fresh");
 });

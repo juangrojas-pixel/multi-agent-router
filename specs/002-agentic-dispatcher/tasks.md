@@ -124,7 +124,7 @@ assert output, exit code and persisted state.
 - [x] T026 Update `src/guidance.ts`: flow preflight -> catalog -> candidates -> dispatch, record `--task`/`--reason`, client-environment restriction kept; failing test first in `tests/guidance.test.ts`
 - [x] T027 [P] Update help text in `src/cli.ts` and `README.md` for every new command and option (constitution: same change)
 - [x] T028 [P] Update the orchestrator skill `skills/delegate/SKILL.md` so ODD task lines carry `agent/model` and reason chosen from `candidates`
-- [ ] T029 Run quickstart.md automated section; run manual read-only steps 1-3 against real agents and record results in the feature log
+- [x] T029 Run quickstart.md automated section; run manual read-only steps 1-3 against real agents and record results in the feature log
 
 ---
 

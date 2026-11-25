@@ -76,7 +76,7 @@ test("US8-AS1/2/3: live run resolves absolute path, answers configured dialog, s
   assert.match(name, /^liveagent-t8-\d+$/);
   assert.ok(name.length <= 32);
   const sep = runCall.indexOf("--");
-  assert.deepEqual(runCall.slice(sep + 1), [absCli, "--model", "m-pro"]);
+  assert.deepEqual(runCall.slice(sep + 1), ["env", "ASK_AGENT_DEPTH=1", absCli, "--model", "m-pro"]);
 
   const keysCalls = recorded.filter((c) => c[0] === "keys");
   assert.deepEqual(keysCalls, [["keys", "t1", "enter"]]);
@@ -226,4 +226,97 @@ test("when hc cannot start a live terminal, it falls back to subprocess", (t) =>
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "PING\n");
   assert.match(result.stderr, /^\[ask-agent\] hc unavailable \(hc server down\), falling back to subprocess$/m);
+});
+
+const shipped = JSON.parse(readFileSync(new URL("../agents.json", import.meta.url), "utf8")).agents;
+
+function liveProbe(t: { after: (fn: () => void) => void }, script: string, env: NodeJS.ProcessEnv = {}) {
+  const s = setup({ liveagent: liveAgent(fixture("stub-ok")) });
+  t.after(() => rmSync(s.root, { recursive: true, force: true }));
+  const result = runCli(["--backend", "live", "-a", "liveagent", "Do work"], {
+    ...s.env, STUB_LIVE_SCRIPT: script, ...env,
+  });
+  return { result, recorded: calls(s.log), exit: runs(s.root)[0].exit };
+}
+
+test("shipped Claude live config leaves folder trust to the user", (t) => {
+  const s = setup({ claude: { ...shipped.claude, command: fixture("stub-ok") } });
+  t.after(() => rmSync(s.root, { recursive: true, force: true }));
+  const result = runCli(["--backend", "live", "-a", "claude", "Do work"], {
+    ...s.env, STUB_LIVE_SCRIPT: "blocked:Do you trust the files in this folder?,idle,working,done",
+  });
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /waiting for you .*Do you trust the files in this folder\?/);
+  assert.ok(!calls(s.log).some(([cmd]) => ["keys", "send", "kill"].includes(cmd)));
+});
+
+test("shipped Codex live config preserves the role effort and tool restrictions", (t) => {
+  const command = fixture("stub-ok");
+  const s = setup({ codex: { ...shipped.codex, command, effort_args: ["--thinking", "{effort}"], effort_levels: ["high"] } }, {
+    roles: { coder: { description: "code", agents: ["codex"], effort: "high" } },
+  });
+  t.after(() => rmSync(s.root, { recursive: true, force: true }));
+  const result = runCli(["--backend", "live", "-r", "coder", "Do the planned work."], { ...s.env, STUB_LIVE_SCRIPT: "idle,working,done" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "ANSWER: Do the planned work.\n");
+  assert.match(result.stderr, /codex answered/);
+  const run = calls(s.log)[0];
+  assert.deepEqual(run.slice(run.indexOf("--thinking")), ["--thinking", "high", "--tools", "read,grep,find,ls"]);
+});
+
+test("completion with a blank answer file fails rather than reporting success", (t) => {
+  const { result, recorded, exit } = liveProbe(t, "idle,working,done", { STUB_LIVE_EMPTY_ANSWER: "1" });
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /liveagent did not provide a non-empty answer/);
+  assert.doesNotMatch(result.stderr, /liveagent answered/);
+  assert.equal(exit, 1);
+  assert.ok(!recorded.some(([cmd]) => ["kill", "rm"].includes(cmd)));
+});
+
+test("post-send startup idle waits for real work instead of returning the startup message", (t) => {
+  const { result, recorded, exit } = liveProbe(t, "idle,idle:Ready,working,idle:Actual reply", { STUB_LIVE_NO_ANSWER: "1" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "Actual reply\n");
+  assert.match(result.stderr, /liveagent answered/);
+  assert.equal(exit, 0);
+  assert.equal(recorded.filter(([cmd]) => cmd === "send").length, 1);
+});
+
+for (const failure of ["exit", "malformed"]) {
+  test(`transient hc get ${failure} does not abort a live task`, (t) => {
+    const { result, recorded, exit } = liveProbe(t, "idle,working,done:Actual reply", { STUB_LIVE_GET_FAILURE: failure, STUB_LIVE_NO_ANSWER: "1" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "Actual reply\n");
+    assert.match(result.stderr, /liveagent answered/);
+    assert.equal(exit, 0);
+    assert.equal(recorded.filter(([cmd]) => cmd === "send").length, 1);
+  });
+}
+
+test("post-send blocked dialog waits for the user, sends no keys and keeps the task", (t) => {
+  const { result, recorded, exit } = liveProbe(t, "idle,working,blocked:Trust this folder?,blocked:Trust this folder?,working,done:Actual reply", { STUB_LIVE_NO_ANSWER: "1" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "Actual reply\n");
+  assert.equal(result.stderr.match(/is waiting for you in hc terminal .*: Trust this folder\?/g)?.length, 1);
+  assert.equal(exit, 0);
+  assert.ok(!recorded.some(([cmd]) => ["keys", "kill", "rm"].includes(cmd)));
+});
+
+test("parallel live terminals with the same truncated prefix get distinct names", (t) => {
+  const ids = ["long-shared-agent-name-before-difference-a", "long-shared-agent-name-before-difference-b"];
+  const s = setup(Object.fromEntries(ids.map((id) => [id, liveAgent(fixture("stub-ok"))])));
+  t.after(() => rmSync(s.root, { recursive: true, force: true }));
+  const result = runCli(["parallel", "--backend", "live", "-a", ids.join(","), "Do the planned work."], {
+    ...s.env, STUB_LIVE_SCRIPT: "idle,working,done",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  for (const id of ids) {
+    assert.ok(result.stdout.includes(`### ${id}\n\nANSWER: Do the planned work.\n`));
+    assert.ok(result.stderr.includes(`${id} answered`));
+  }
+  const names = calls(s.log).filter(([cmd]) => cmd === "run").map((argv) => argv[argv.indexOf("--name") + 1]);
+  assert.equal(new Set(names).size, 2);
+  assert.ok(names.every((name) => name.length <= 32));
 });

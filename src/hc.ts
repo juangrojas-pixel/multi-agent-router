@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { agentEnv } from "./agents.ts";
 
 export type ProcessResult = { stdout: string; stderr: string; status: number; timedOut: boolean };
 
@@ -19,7 +20,7 @@ printf '%s\\n' "$rc" >"$d/rc.tmp" && mv "$d/rc.tmp" "$d/rc"
 type Captured = { output: string; status: number | null; error: string };
 
 // Runs an hc subcommand; `output` is stdout and stderr together, as `2>&1` gives them.
-function capture(command: string, args: string[]): Promise<Captured> {
+export function capture(command: string, args: string[]): Promise<Captured> {
   return new Promise((resolve) => {
     let output = "";
     let error = "";
@@ -49,7 +50,7 @@ function readText(path: string): string {
   try { return readFileSync(path, "utf8"); } catch { return ""; }
 }
 
-function address(output: string): string {
+export function address(output: string): string {
   try {
     const value = JSON.parse(output).address;
     return typeof value === "string" ? value : "";
@@ -58,11 +59,19 @@ function address(output: string): string {
   }
 }
 
-// `<agent>-<task or model>-<pid>`: readable in the Herdr app, unique among live terminals.
+const terminalNames = new Set<string>();
+
+// Keep the readable name when possible, reserving room for a discriminator on collisions.
 export function terminalName(agentId: string, label = ""): string {
-  const suffix = `-${process.pid}`;
   const base = `${agentId}-${label}`.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  return `${base.slice(0, 32 - suffix.length).replace(/-$/, "")}${suffix}`;
+  for (let ordinal = 0; ; ordinal++) {
+    const suffix = ordinal ? `-${ordinal}-${process.pid}` : `-${process.pid}`;
+    const name = `${base.slice(0, 32 - suffix.length).replace(/-$/, "")}${suffix}`;
+    if (!terminalNames.has(name)) {
+      terminalNames.add(name);
+      return name;
+    }
+  }
 }
 
 // Runs `command args` inside a live hc terminal that `hc attach NAME` shows while it works. The
@@ -83,7 +92,7 @@ export async function hcRun(
 ): Promise<ProcessResult> {
   const name = terminalName(agentId, label);
   const dir = mkdtempSync(join(tmpdir(), "ask-agent-hc-"));
-  const env = { ...process.env, ASK_AGENT_DEPTH: "1" };
+  const env = agentEnv();
   writeFileSync(join(dir, "env"), Object.entries(env).map(([key, value]) => `${key}=${value}\0`).join(""));
   writeFileSync(join(dir, "run"), runScript);
   // Shown on the terminal before the agent starts (agents in print/JSON mode print nothing until

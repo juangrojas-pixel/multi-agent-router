@@ -189,7 +189,9 @@
       },
       "live": {
         "args": [
-          "{model_args}"
+          "{model_args}",
+          "{effort_args}",
+          "{extra_args}"
         ],
         "model_args": [
           "--model",
@@ -386,14 +388,6 @@
         "model_args": [
           "--model",
           "{model}"
-        ],
-        "dialogs": [
-          {
-            "match": "Do you trust the files in this folder?",
-            "keys": [
-              "enter"
-            ]
-          }
         ]
       },
       "description": "Claude Code in print mode; explicit use only (-a claude -m haiku|sonnet|opus), never in tiers or roles; shares the orchestrator quota"

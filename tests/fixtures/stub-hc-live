@@ -149,6 +149,14 @@ if (sub === "get") {
     process.stdout.write(`${JSON.stringify({ state: alive ? "live" : "finished" })}\n`);
     process.exit(0);
   }
+  if (s.turn === 2 && process.env.STUB_LIVE_GET_FAILURE) {
+    if (process.env.STUB_LIVE_GET_FAILURE === "exit") {
+      process.stderr.write("hc temporarily unavailable\n");
+      process.exit(1);
+    }
+    process.stdout.write("{}\n");
+    process.exit(0);
+  }
   process.stdout.write(`${JSON.stringify({
     state: s.state,
     exit_code: s.exitCode,
@@ -169,7 +177,7 @@ if (sub === "send") {
   if (process.env.STUB_LIVE_NO_ANSWER !== "1") {
     const match = text.match(/write your complete final answer to (\S+)/);
     if (match) {
-      writeFileSync(match[1], `ANSWER: ${text.slice(0, 20)}`);
+      writeFileSync(match[1], process.env.STUB_LIVE_EMPTY_ANSWER ? " \n" : `ANSWER: ${text.slice(0, 20)}`);
     }
   }
   process.exit(0);

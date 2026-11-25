@@ -1,37 +1,16 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Agent, LiveConfig } from "./config.ts";
-import { terminalName, type ProcessResult } from "./hc.ts";
-
-type Captured = { output: string; status: number | null; error: string };
-
-function capture(command: string, args: string[]): Promise<Captured> {
-  return new Promise((resolveCapture) => {
-    let output = "";
-    let error = "";
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => { output += chunk; });
-    child.stderr.on("data", (chunk: string) => { output += chunk; });
-    child.on("error", (failure: NodeJS.ErrnoException) => {
-      if (failure.code === "ENOENT") error = command.includes("/") ? `${command}: No such file or directory` : `${command}: command not found`;
-      else if (failure.code === "EACCES") error = `${command}: Permission denied`;
-      else error = `${command}: ${failure.message}`;
-    });
-    child.on("close", (status) => resolveCapture({ output: error ? `${output}${error}\n` : output, status, error }));
-  });
-}
+import { commandArgs } from "./agents.ts";
+import { address, capture, terminalName, type ProcessResult } from "./hc.ts";
 
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
 }
 
 function note(message: string): void { process.stderr.write(`[ask-agent] ${message}\n`); }
-
-// `<agent>-<task or model>-<pid>`: matches hcRun naming, <= 32 chars, unique among live terminals.
 
 // Resolves `command` using `command -v` semantics against the router's PATH so hc's daemon
 // (whose PATH may lack user bin directories) can launch it by absolute path.
@@ -43,34 +22,19 @@ export function resolveCommandPath(command: string): string {
 }
 
 export function liveArgs(agent: Agent, live: LiveConfig, model: string, effort = "", fallbackModelArgs?: string[]): string[] {
-  const timeout = String(agent.timeout_seconds ?? 600);
-  const modelArgs = live.model_args ?? fallbackModelArgs ?? agent.model_args;
-  const fragments: Record<string, string[]> = {
-    "{model_args}": model && modelArgs ? modelArgs.map((item) => item.replaceAll("{model}", model)) : [],
-    "{effort_args}": effort && agent.effort_args ? agent.effort_args.map((item) => item.replaceAll("{effort}", effort)) : [],
-    "{extra_args}": agent.extra_args ?? [],
-  };
-  const out: string[] = [];
-  for (const part of live.args) {
-    if (part in fragments) out.push(...fragments[part]);
-    else out.push(part.replaceAll("{timeout}", timeout).replaceAll("{model}", model));
-  }
-  return out;
-}
-
-function address(output: string): string {
-  try {
-    const value = JSON.parse(output).address;
-    return typeof value === "string" ? value : "";
-  } catch {
-    return "";
-  }
+  return commandArgs("", {
+    ...agent,
+    args: live.args,
+    model_args: live.model_args ?? fallbackModelArgs ?? agent.model_args,
+    output: agent.output ?? "text",
+  }, "{prompt}", model, effort);
 }
 
 type GetInfo = { live: boolean; exitCode: number; statusState: string; statusMsg: string };
-function parseGet(output: string): GetInfo {
+function parseGet(output: string): GetInfo | null {
   try {
     const data = JSON.parse(output);
+    if (typeof data?.state !== "string" || !data.state) return null;
     const status = data?.status && typeof data.status === "object" ? data.status : {};
     return {
       live: data?.state === "live",
@@ -79,7 +43,7 @@ function parseGet(output: string): GetInfo {
       statusMsg: typeof status.msg === "string" ? status.msg : "",
     };
   } catch {
-    return { live: false, exitCode: 1, statusState: "", statusMsg: "" };
+    return null;
   }
 }
 
@@ -127,7 +91,7 @@ export async function liveRun(run: LiveRun): Promise<ProcessResult | null> {
     "--name", name,
     "--cwd", process.cwd(),
     "--label", "ask-agent=1",
-    "--", absCommand, ...args,
+    "--", "env", "ASK_AGENT_DEPTH=1", absCommand, ...args,
   ]);
   const addr = address(started.output);
   if (!addr) {
@@ -142,8 +106,23 @@ export async function liveRun(run: LiveRun): Promise<ProcessResult | null> {
   const dialogs = live.dialogs ?? [];
   const dialogCounts = dialogs.map(() => 0);
   let sent = false;
+  let worked = false;
   let lastMsg = "";
   let needWait = false;
+  let blockedNoted = "";
+
+  function readAnswer(): string | undefined {
+    return existsSync(answerFile) ? readFileSync(answerFile, "utf8") : undefined;
+  }
+
+  function finishAnswer(stdout: string): ProcessResult {
+    rmSync(dir, { recursive: true, force: true });
+    if (!stdout.trim()) {
+      return { stdout: "", stderr: `${agentId} did not provide a non-empty answer\n`, status: 1, timedOut: false };
+    }
+    note(`${agentId} answered; its terminal ${name} stays open in the Herdr app`);
+    return { stdout, stderr: "", status: 0, timedOut: false };
+  }
 
   async function finishTimeout(): Promise<ProcessResult> {
     const interrupted = await capture(hc, ["interrupt", addr, "--timeout", "2"]);
@@ -151,8 +130,8 @@ export async function liveRun(run: LiveRun): Promise<ProcessResult | null> {
       await capture(hc, ["kill", addr]);
     } else {
       const after = await capture(hc, ["get", addr, "--json"]);
-      const info = parseGet(after.output);
-      if (info.live && info.statusState === "working") {
+      const info = after.status === 0 ? parseGet(after.output) : null;
+      if (!info || (info.live && info.statusState === "working")) {
         await capture(hc, ["kill", addr]);
       }
     }
@@ -180,17 +159,17 @@ export async function liveRun(run: LiveRun): Promise<ProcessResult | null> {
     }
 
     const got = await capture(hc, ["get", addr, "--json"]);
-    const info = parseGet(got.output);
+    const info = got.status === 0 ? parseGet(got.output) : null;
+    if (!info) {
+      needWait = true;
+      continue;
+    }
     const statusState = info.statusState || waitStatus;
     if (info.statusMsg) lastMsg = info.statusMsg;
 
     if (!info.live) {
-      if (sent && existsSync(answerFile)) {
-        const stdout = readFileSync(answerFile, "utf8");
-        note(`${agentId} answered; its terminal ${name} stays open in the Herdr app`);
-        rmSync(dir, { recursive: true, force: true });
-        return { stdout, stderr: "", status: 0, timedOut: false };
-      }
+      const stdout = sent ? readAnswer() : undefined;
+      if (stdout?.trim()) return finishAnswer(stdout);
       rmSync(dir, { recursive: true, force: true });
       const msg = lastMsg || `hc terminal ${name} ended unexpectedly (exit ${info.exitCode})`;
       return { stdout: "", stderr: `${msg}\n`, status: info.exitCode || 1, timedOut: false };
@@ -199,13 +178,20 @@ export async function liveRun(run: LiveRun): Promise<ProcessResult | null> {
     if (statusState === "blocked") {
       const msg = info.statusMsg;
       const matchIndex = dialogs.findIndex((dialog) => msg.includes(dialog.match));
-      if (matchIndex !== -1 && dialogCounts[matchIndex] < 3) {
+      if (!sent && matchIndex !== -1 && dialogCounts[matchIndex] < 3) {
         dialogCounts[matchIndex] += 1;
         await capture(hc, ["keys", addr, ...dialogs[matchIndex].keys]);
         needWait = true;
         continue;
       }
-      note(`${agentId} is waiting for you in hc terminal ${name}: ${msg}`);
+      if (msg !== blockedNoted) note(`${agentId} is waiting for you in hc terminal ${name}: ${msg}`);
+      blockedNoted = msg;
+      if (sent) {
+        // The task is running: let the user answer in the app. The deadline still
+        // bounds the wait, and finishTimeout stops the task, so nothing is orphaned.
+        needWait = true;
+        continue;
+      }
       rmSync(dir, { recursive: true, force: true });
       return { stdout: "", stderr: msg ? `${msg}\n` : "blocked\n", status: 2, timedOut: false };
     }
@@ -228,17 +214,22 @@ export async function liveRun(run: LiveRun): Promise<ProcessResult | null> {
       continue;
     }
 
-    if (sent && (statusState === "done" || statusState === "idle")) {
-      let stdout = "";
-      if (existsSync(answerFile)) {
-        stdout = readFileSync(answerFile, "utf8");
-      } else {
-        note(`${agentId} did not write the answer file; using its last status message`);
-        stdout = info.statusMsg || lastMsg;
+    if (sent) {
+      if (statusState === "working") worked = true;
+      if (statusState === "done" || statusState === "idle") {
+        const stdout = readAnswer();
+        // An idle snapshot can be left over from before send. A real answer or
+        // an observed working state distinguishes it from completion.
+        if (statusState === "done" || worked || stdout?.trim()) {
+          if (stdout !== undefined) return finishAnswer(stdout);
+          const msg = info.statusMsg.trim();
+          if (msg && msg !== "DONE") {
+            note(`${agentId} did not write the answer file; using its last status message`);
+            return finishAnswer(info.statusMsg);
+          }
+          return finishAnswer("");
+        }
       }
-      note(`${agentId} answered; its terminal ${name} stays open in the Herdr app`);
-      rmSync(dir, { recursive: true, force: true });
-      return { stdout, stderr: "", status: 0, timedOut: false };
     }
 
     needWait = true;

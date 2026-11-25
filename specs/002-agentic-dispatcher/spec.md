@@ -214,7 +214,7 @@ shows those scores for the mapped models, the source and the date.
   marked as declared.
 - **FR-014**: Roles in config MUST remain the default route when the orchestrator does not
   choose an agent and model explicitly.
-- **FR-015**: All tiers, cost ceilings, concurrency limits, benchmark sources and name
+- **FR-015**: All capability tiers, cost ceilings, concurrency limits, benchmark sources and name
   mappings MUST live in config, validated before any agent starts.
 - **FR-016**: The orchestrator guidance (`ask-agent guidance`) MUST explain how to use the
   catalog, candidates, preflight and batch dispatch, so any orchestrator can follow it.

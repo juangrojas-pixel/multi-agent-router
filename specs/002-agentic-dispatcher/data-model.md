@@ -16,7 +16,7 @@
     "claude": { "enabled": true, "models": ["haiku", "sonnet", "opus"],
                 "shares_quota_with": "orchestrator" }
   },
-  "tiers": ["light", "standard", "strong", "frontier"],
+  "capability_tiers": ["light", "standard", "strong", "frontier"],
   "kinds": ["code", "reasoning", "writing", "review"],
   "sizes": { "s": 20000, "m": 80000, "l": 250000 },        // expected output tokens
   "cost_ceiling": 5.0,                                       // relative units
@@ -41,7 +41,7 @@
 ```
 
 Validation rules (Constitution VII, exit 2 naming the key):
-- `tiers` non-empty, unique; every tier used in `models.*.tier` exists in `tiers`.
+- `capability_tiers` non-empty, unique; every tier used in `models.*.tier` exists in `capability_tiers` (named so because `tiers` already holds the agent tier lists).
 - every key in `models.*.tier` exists in `kinds`.
 - `sizes` values positive integers; `cost_ceiling` > 0; `dispatch.concurrency` integer >= 1.
 - `parse` values belong to the built-in parser set.

@@ -183,3 +183,18 @@ export function runsTable(limit: number, agent: string): string | null {
   }
   return rows.slice(limit === 0 ? rows.length : -limit).map((row) => `${row}\n`).join("");
 }
+
+// Cache files of the agentic dispatcher (catalog.json, benchmarks.json): read as null when
+// missing or unreadable, written atomically (temp file + rename) like last/<agent>.json.
+export function readCache<T>(name: string): T | null {
+  try { return JSON.parse(readFileSync(join(stateDir(), name), "utf8")) as T; } catch { return null; }
+}
+
+export function writeCache(name: string, value: unknown): void {
+  ensure();
+  const tempDir = mkdtempSync(join(stateDir(), `.${name}-`));
+  const temp = join(tempDir, "value");
+  writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`);
+  renameSync(temp, join(stateDir(), name));
+  rmSync(tempDir, { recursive: true, force: true });
+}

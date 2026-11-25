@@ -29,8 +29,8 @@ assert output, exit code and persisted state.
 
 ## Phase 2: Foundational (blocks all stories)
 
-- [ ] T003 Write failing config-validation tests in `tests/config-validate.test.ts` for the new keys, each error exiting 2 and naming the key: "`tiers` non-empty, unique; every tier used in `models.*.tier` exists in `tiers`", "every key in `models.*.tier` exists in `kinds`", "`sizes` values positive integers; `cost_ceiling` > 0; `dispatch.concurrency` integer >= 1", "`parse` values belong to the built-in parser set", "`list_models.cmd[0]` and `version_cmd[0]` non-empty strings"
-- [ ] T004 Implement those keys and validations in `src/config.ts` (types `Agent.list_models`, `version_cmd`, `latest_cmd`, `update_cmd`, `quota_groups`, `shares_quota_with`; top-level `tiers`, `kinds`, `sizes`, `cost_ceiling`, `dispatch`, `models`, `model_aliases`, `benchmarks`)
+- [ ] T003 Write failing config-validation tests in `tests/config-validate.test.ts` for the new keys, each error exiting 2 and naming the key: "`capability_tiers` non-empty, unique; every tier used in `models.*.tier` exists in `capability_tiers`", "every key in `models.*.tier` exists in `kinds`", "`sizes` values positive integers; `cost_ceiling` > 0; `dispatch.concurrency` integer >= 1", "`parse` values belong to the built-in parser set", "`list_models.cmd[0]` and `version_cmd[0]` non-empty strings"
+- [ ] T004 Implement those keys and validations in `src/config.ts` (types `Agent.list_models`, `version_cmd`, `latest_cmd`, `update_cmd`, `quota_groups`, `shares_quota_with`; top-level `capability_tiers`, `kinds`, `sizes`, `cost_ceiling`, `dispatch`, `models`, `model_aliases`, `benchmarks`)
 - [ ] T005 Add `catalog.json` and `benchmarks.json` read/write helpers in `src/state.ts` under `stateDir()`, atomic write (temp file + rename) like the existing cooldown file
 
 **Checkpoint**: config accepts and validates the new keys; existing tests stay green.

@@ -8,6 +8,10 @@ export type Agent = {
   models?: string[]; effort_levels?: string[];
   output?: "text" | "agy-json" | "opencode-events";
   backend?: string;
+  // Agentic dispatcher (specs/002-agentic-dispatcher/data-model.md).
+  list_models?: { cmd: string[]; parse: string; timeout_seconds?: number };
+  version_cmd?: string[]; latest_cmd?: string[] | null; update_cmd?: string;
+  quota_groups?: Record<string, string>; shares_quota_with?: string;
 };
 // A role entry is an agent id, or an agent id with its own model and effort.
 export type RoleAgent = string | { agent: string; model?: string; effort?: string };
@@ -16,9 +20,19 @@ export type Config = {
   cooldown_seconds?: number; default_tier?: string; tiers?: Record<string, string[]>; agents: Record<string, Agent>;
   roles?: Record<string, Role>; orchestrator?: { agent: string }; routing?: { notes?: string; general?: string; rules?: Array<{ role?: string }> };
   prompt_preamble?: string; backend?: string;
+  capability_tiers?: string[]; kinds?: string[]; sizes?: Record<string, number>; cost_ceiling?: number;
+  dispatch?: { concurrency?: number }; models?: Record<string, { tier?: Record<string, string> }>;
+  model_aliases?: Record<string, string>;
+  benchmarks?: { max_age_days?: number; sources?: Array<{ id: string; url: string; parse: string }> };
 };
 
 const outputs = ["text", "agy-json", "opencode-events"];
+export const listParsers = ["tsv", "lines-first-field"];
+export const benchmarkParsers = ["models-dev", "lmarena-hf", "openrouter", "artificial-analysis"];
+
+function badCommand(cmd: unknown): boolean {
+  return !Array.isArray(cmd) || typeof cmd[0] !== "string" || cmd[0] === "";
+}
 
 // Checks the rules of data-model.md and returns the first mistake as "KEY: MESSAGE", or null.
 export function validateConfig(config: Config): string | null {
@@ -27,7 +41,16 @@ export function validateConfig(config: Config): string | null {
     if (agent.output !== undefined && !outputs.includes(agent.output)) {
       return `agents.${id}.output: unknown output: ${agent.output} (use text, agy-json or opencode-events)`;
     }
+    if (agent.list_models) {
+      if (badCommand(agent.list_models.cmd)) return `agents.${id}.list_models.cmd: must start with a non-empty command`;
+      if (!listParsers.includes(agent.list_models.parse)) {
+        return `agents.${id}.list_models.parse: unknown parser: ${agent.list_models.parse} (use tsv or lines-first-field)`;
+      }
+    }
+    if (agent.version_cmd !== undefined && badCommand(agent.version_cmd)) return `agents.${id}.version_cmd: must start with a non-empty command`;
   }
+  const dispatcher = validateDispatcher(config);
+  if (dispatcher) return dispatcher;
   for (const [name, role] of Object.entries(config.roles ?? {})) {
     if (!role.agents?.length) return `roles.${name}.agents: role has no agents`;
     for (const [index, item] of role.agents.entries()) {
@@ -45,6 +68,33 @@ export function validateConfig(config: Config): string | null {
   if (config.orchestrator && !agents[config.orchestrator.agent]) return `orchestrator.agent: unknown agent: ${config.orchestrator.agent}`;
   for (const [index, rule] of (config.routing?.rules ?? []).entries()) {
     if (rule.role !== undefined && !config.roles?.[rule.role]) return `routing.rules[${index}].role: unknown role: ${rule.role}`;
+  }
+  return null;
+}
+
+function validateDispatcher(config: Config): string | null {
+  const tiers = config.capability_tiers;
+  if (tiers !== undefined && (!Array.isArray(tiers) || tiers.length === 0 || new Set(tiers).size !== tiers.length)) {
+    return "capability_tiers: must be a non-empty list of unique names";
+  }
+  for (const [model, facts] of Object.entries(config.models ?? {})) {
+    for (const [kind, tier] of Object.entries(facts.tier ?? {})) {
+      if (!config.kinds?.includes(kind)) return `models.${model}.tier.${kind}: unknown kind: ${kind}`;
+      if (!tiers?.includes(tier)) return `models.${model}.tier.${kind}: unknown tier: ${tier}`;
+    }
+  }
+  for (const [size, tokens] of Object.entries(config.sizes ?? {})) {
+    if (!Number.isInteger(tokens) || tokens <= 0) return `sizes.${size}: must be a positive integer`;
+  }
+  if (config.cost_ceiling !== undefined && !(typeof config.cost_ceiling === "number" && config.cost_ceiling > 0)) {
+    return "cost_ceiling: must be greater than 0";
+  }
+  const concurrency = config.dispatch?.concurrency;
+  if (concurrency !== undefined && !(Number.isInteger(concurrency) && concurrency >= 1)) return "dispatch.concurrency: must be an integer >= 1";
+  for (const [index, source] of (config.benchmarks?.sources ?? []).entries()) {
+    if (!benchmarkParsers.includes(source.parse)) {
+      return `benchmarks.sources[${index}].parse: unknown parser: ${source.parse} (use models-dev, lmarena-hf, openrouter or artificial-analysis)`;
+    }
   }
   return null;
 }

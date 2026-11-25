@@ -37,7 +37,58 @@ const cases: Array<[string, object, string]> = [
     "config: orchestrator.agent: unknown agent: ghost"],
   ["unknown routing rule role", { roles: { coder: { description: "d", agents: ["one"] } }, routing: { rules: [{ id: "a" }, { id: "b", role: "ghost" }] } },
     "config: routing.rules[1].role: unknown role: ghost"],
+  // Agentic dispatcher keys (specs/002-agentic-dispatcher/data-model.md).
+  ["empty capability tiers", { capability_tiers: [] },
+    "config: capability_tiers: must be a non-empty list of unique names"],
+  ["duplicate capability tier", { capability_tiers: ["light", "light"] },
+    "config: capability_tiers: must be a non-empty list of unique names"],
+  ["model tier not in capability_tiers", { capability_tiers: ["light", "strong"], kinds: ["code"], models: { m1: { tier: { code: "ultra" } } } },
+    "config: models.m1.tier.code: unknown tier: ultra"],
+  ["model tier kind not in kinds", { capability_tiers: ["light"], kinds: ["code"], models: { m1: { tier: { poetry: "light" } } } },
+    "config: models.m1.tier.poetry: unknown kind: poetry"],
+  ["size not a positive integer", { sizes: { s: 0 } },
+    "config: sizes.s: must be a positive integer"],
+  ["cost ceiling not positive", { cost_ceiling: 0 },
+    "config: cost_ceiling: must be greater than 0"],
+  ["dispatch concurrency below 1", { dispatch: { concurrency: 0 } },
+    "config: dispatch.concurrency: must be an integer >= 1"],
+  ["unknown benchmark parser", { benchmarks: { sources: [{ id: "x", url: "file:///x", parse: "csv" }] } },
+    "config: benchmarks.sources[0].parse: unknown parser: csv (use models-dev, lmarena-hf, openrouter or artificial-analysis)"],
 ];
+
+const agentCases: Array<[string, object, string]> = [
+  ["unknown list_models parser", { list_models: { cmd: ["x"], parse: "xml" } },
+    "config: agents.plain.list_models.parse: unknown parser: xml (use tsv or lines-first-field)"],
+  ["empty list_models command", { list_models: { cmd: [], parse: "tsv" } },
+    "config: agents.plain.list_models.cmd: must start with a non-empty command"],
+  ["empty version_cmd", { version_cmd: [""] },
+    "config: agents.plain.version_cmd: must start with a non-empty command"],
+];
+
+for (const [name, extra, message] of agentCases) {
+  test(`${name} stops every command before any agent starts`, () => {
+    const config = base({}) as { agents: Record<string, Record<string, unknown>> };
+    Object.assign(config.agents.plain, extra);
+    const s = scratchConfig(config);
+    const result = runCli(["-a", "one", "hello"], s.env);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, `[ask-agent] ${message}\n`);
+  });
+}
+
+test("valid dispatcher keys are accepted", () => {
+  const config = base({
+    capability_tiers: ["light", "standard", "strong", "frontier"], kinds: ["code", "writing"],
+    sizes: { s: 20000, m: 80000 }, cost_ceiling: 5, dispatch: { concurrency: 3 },
+    models: { m1: { tier: { code: "strong" } } }, model_aliases: { m1: "m-one" },
+    benchmarks: { max_age_days: 7, sources: [{ id: "md", url: "file:///x", parse: "models-dev" }] },
+  }) as { agents: Record<string, Record<string, unknown>> };
+  Object.assign(config.agents.plain, { list_models: { cmd: ["x", "models"], parse: "tsv" }, version_cmd: ["x", "--version"], quota_groups: { "*": "G" } });
+  const s = scratchConfig(config);
+  const result = runCli(["-a", "one", "hello"], s.env);
+  assert.equal(result.status, 0, result.stderr);
+});
 
 for (const [name, extra, message] of cases) {
   test(`${name} stops every command before any agent starts`, () => {

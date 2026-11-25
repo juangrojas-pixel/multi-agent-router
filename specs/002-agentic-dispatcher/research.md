@@ -72,7 +72,7 @@ All findings checked live on 2026-11-25 unless marked unverified.
 
 ## R5. Tiers and kinds of work
 
-- **Decision**: a small fixed vocabulary in config, not code: `tiers` ordered list
+- **Decision**: a small fixed vocabulary in config, not code: `capability_tiers` ordered list
   (default `light < standard < strong < frontier`) and `kinds` (`code`, `reasoning`,
   `writing`, `review`). Each model gets a tier per kind: measured (from LMArena rank bands per
   category, thresholds in config) or declared (config). Declared always wins when present, so

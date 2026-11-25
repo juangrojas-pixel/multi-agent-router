@@ -3,6 +3,8 @@
   "default_tier": "execute",
   "capability_tiers": ["light", "standard", "strong", "frontier"],
   "kinds": ["code", "reasoning", "writing", "review"],
+  "sizes": { "s": 20000, "m": 80000, "l": 250000 },
+  "cost_ceiling": 5,
   "model_aliases": {
     "haiku": "claude-haiku-5-5",
     "sonnet": "claude-sonnet-5-5",

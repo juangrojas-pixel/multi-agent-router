@@ -114,6 +114,14 @@ With `benchmarks` configured, only `ask-agent catalog --refresh` fetches benchma
 
 Set `model_aliases` for names that don't match after normalization. A tier declared in `models.<id>.tier` overrides a measured one and is marked `*`. `$out/M` is a price indicator, not a subscription charge. `catalog --json` adds `profile` to each model; `null` means no benchmark data or declared tier, and the text view adds nothing for that model.
 
+### Candidates
+
+`ask-agent candidates --kind KIND --tier TIER [--size s|m|l] [--client] [-n N] [--json]` ranks `(agent, model)` pairs from the cached catalog and benchmark profiles that meet or exceed `TIER` (in `capability_tiers` order) for `KIND` (from `kinds`). Only `usable` and `unverified` models are eligible (`out_of_quota`, `unavailable`, and untiered models are skipped).
+
+Candidates are ordered by lowest `est_cost` (`price_out_per_m * sizes[size] / 1e6`, rounded to 2 decimals; default size `m`; free models cost `0`; models without price sort after priced ones and show `cost=?`), then highest LMArena score for `KIND` (lowest rank), then agent order in `agents.json`. A candidate above `cost_ceiling` is marked `!` in place of its rank with `over ceiling C -> use #N` pointing to the cheapest capable alternative under the ceiling. Agents with `shares_quota_with` note `shares <x> quota` in their reason, declared tiers carry `*`, and quota is shown only when known.
+
+`--client` restricts candidates to agents listed in `client_agents` from the private policy file (fail-closed when absent). `-n N` limits results (default `5`); `--json` prints the array of `{ agent, model, tier, tier_source, est_cost, quota_left, over_ceiling, reason }` objects. Exit codes: `0` at least one candidate, `4` none meets the need (prints the best model below `TIER` on stderr when any model has a tier for `KIND`) or no agent allowed for `--client`, `2` invalid usage or unknown `KIND`, `TIER`, or `size`.
+
 ### Preflight
 
 `ask-agent preflight [--json]` checks the installed and latest CLI versions for enabled agents, refreshes the model catalog, and reports model counts by status, the lowest known quota per agent, and benchmark cache freshness. Missing or failed version lookups show `unknown`; benchmark freshness is checked locally, with no benchmark download. Without benchmark configuration, it shows `not configured`.

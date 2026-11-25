@@ -24,9 +24,9 @@ Task IDs are those of `specs/002-agentic-dispatcher/tasks.md`.
 - [x] P3 US2 T006-T010 (S3). Route: inline by Claude, in parallel with P4. RED 4 failing, GREEN 9/9; full suites green (124 node excl. catalog, 35 parity, 51 route-hint). Commit `ea96727`.
 - [x] P4 US1 T011-T014 (S2). Route: delegated to gentle-shell on `openai-codex/gpt-6.2-sol` (writer reason: parallel unit with P3, disjoint surfaces; user rule "te lo repartis con gentle-shell"). `src/cli.ts` wiring done by parent before launch. RED 4 observed by the writer; seam check 128/128. `pi-table` parser added inline after the real run (RED 1, GREEN 129/129). Commit `ea96727`.
 - [x] P5 US3 T015-T017 (S4). Route: delegated to gentle-shell on `openai-codex/gpt-6.2-sol` (parallel with the verifier fix and model_source work). Seam check 145/145, 35, 51. Commit `3e11b64`.
-- [ ] P5b Hardening from RDD advisories (S2-S4): stale catalog gate (a new model stays refused until `catalog --refresh`), list timeout cap in preflight, quota worker failure marking every agent, cache omitting newly enabled agents, newer-than-latest version shown as unknown, model check only on named agents (not fallbacks). Not started.
-- [ ] P6 US6 T001, T018-T020 (S7). Not this session.
-- [ ] P7 US4 T021-T022 (S5). Not this session.
+- [x] P5b Hardening from RDD advisories (S2-S4), inline. Commits `c94a911` and (catalog part) `7dd32e6`: stale catalog gate (a new model stays refused until `catalog --refresh`), list timeout cap in preflight, quota worker failure marking every agent, cache omitting newly enabled agents, newer-than-latest version shown as unknown, model check only on named agents (not fallbacks).
+- [x] P6 US6 T001, T018-T020 (S7). Route: delegated to gentle-shell on `openai-codex/gpt-6.2-sol`. Commit `7dd32e6`.
+- [ ] P7 US4 T021-T022 (S5). Route: delegated to agy on `gemini-4-neon-high` (catalog: frontier for code, Gemini quota 96%). In progress.
 - [ ] P8 US5 T002, T023-T025 (S6). Not this session.
 - [ ] P9 Polish T026-T029 (S1). Not this session.
 
@@ -63,3 +63,6 @@ Task IDs are those of `specs/002-agentic-dispatcher/tasks.md`.
   - R3-version-newer-unknown (reliability, WARNING) src/preflight.ts:29-30
   - R4-preflight-list-timeout-cap (resilience, WARNING) src/catalog.ts:95
   - R4-stale-catalog-gate (resilience, WARNING) src/run.ts:88-96
+- L14 (2026-11-25) User: "si, sigue con P6 y P7 y la p5b creo que la nombraste tambien".
+- L15 (2026-11-25) P5b inline: stale catalog gate now refreshes the agent once (RED, GREEN), fallbacks that cannot run -m are skipped (RED, GREEN), newer-than-latest is current (RED, GREEN), newly enabled agent listed from cache (RED, GREEN); crashed quota worker resolves empty and preflight list timeout uncapped have no deterministic RED (written with the fix). An auto-refresh on agents without list_models overwrote a CLI catalog with config data in an existing test; restricted to agents with list_models.
+- L16 (2026-11-25) P6 receipt from gentle-shell again ended with suites "running" (second time: it backgrounds suites and ends its turn); parent seam check 150/150, 35, 51. First real refresh: lmarena failed (shared 15 s timeout across 21 HF pages plus other sources); fixed with one timeout per request, real refresh fresh in 24.1 s. Real data: LMArena ranks GPT-6.2 Sol 109 in coding (preference-based), so it measures `light`; Sonnet 5.5 rank 28 -> standard; Neon/Carbon/Opus frontier. Open question for the user: declared tiers for GPT (config `models.<id>.tier`) or an agentic-coding source (Epoch SWE-bench) before P7 routes on these tiers.

@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { accessSync, constants } from "node:fs";
-import { buildAgent, commandArgs, parseOutput } from "./agents.ts";
+import { buildAgent, commandArgs, parseMeta, parseOutput } from "./agents.ts";
 import type { Config } from "./config.ts";
 import { hcRun, type ProcessResult } from "./hc.ts";
 import { changedFiles, cooldown, gitSnapshot, readCache, record, setCooldown } from "./state.ts";
@@ -79,13 +79,16 @@ function agyQuotaReason(command: string, quota: { group: string; min_remaining: 
 let runContext = { task: "", reason: "" };
 export function setRunContext(task: string, reason: string): void { runContext = { task, reason }; }
 
-type CatalogCache = { agents?: Record<string, { models?: Array<{ id: string; status: string }> }> };
+type CatalogCache = { agents?: Record<string, { source?: string; models?: Array<{ id: string; status: string }> }> };
 
-// Why `model` cannot run on agent `id`, or null. The catalog (catalog.json) wins when it lists
-// the agent: only usable and unverified models run. Without it, config `models` decides.
+// Why `model` cannot run on agent `id`, or null. The catalog (catalog.json) wins when the agent's
+// own CLI listed its models: only usable and unverified models run. When the catalog only
+// echoes config (source "config") or has no entry, config `models` decides; an agent without
+// `models` accepts any model.
 export function modelProblem(id: string, config: Config, model: string): string | null {
   if (!model) return null;
-  const listed = readCache<CatalogCache>("catalog.json")?.agents?.[id]?.models;
+  const entry0 = readCache<CatalogCache>("catalog.json")?.agents?.[id];
+  const listed = entry0?.source === "cli" ? entry0.models : undefined;
   if (listed) {
     const entry = listed.find((item) => item.id === model);
     if (!entry) return "not in catalog";
@@ -184,12 +187,13 @@ async function execute(
   // The bash router's view of the output: stdout, a newline, stderr, trailing newlines dropped.
   const combined = `${result.stdout.replace(/\n+$/, "")}\n${result.stderr.replace(/\n+$/, "")}`;
   const answer = parseOutput(built.output, result.stdout);
+  const meta = parseMeta(built.output, result.stdout);
   const quota = quotaPattern.test(output);
 
   record(
     id,
     tier,
-    model,
+    meta.model || model,
     Math.floor(Date.now() / 1000),
     result.status,
     seconds,
@@ -199,7 +203,8 @@ async function execute(
     role,
     {
       requested_model: requestedModel,
-      model_source: "requested",
+      model_source: meta.model ? "reported" : "requested",
+      ...(meta.tokens_in !== undefined ? { tokens_in: meta.tokens_in, tokens_out: meta.tokens_out } : {}),
       ...(runContext.task ? { task_id: runContext.task } : {}),
       ...(runContext.reason ? { reason: runContext.reason } : {}),
     },

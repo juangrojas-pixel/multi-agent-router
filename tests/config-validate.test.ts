@@ -42,6 +42,8 @@ const cases: Array<[string, object, string]> = [
     "config: capability_tiers: must be a non-empty list of unique names"],
   ["duplicate capability tier", { capability_tiers: ["light", "light"] },
     "config: capability_tiers: must be a non-empty list of unique names"],
+  ["empty capability tier name", { capability_tiers: ["light", ""] },
+    "config: capability_tiers: must be a non-empty list of unique names"],
   ["model tier not in capability_tiers", { capability_tiers: ["light", "strong"], kinds: ["code"], models: { m1: { tier: { code: "ultra" } } } },
     "config: models.m1.tier.code: unknown tier: ultra"],
   ["model tier kind not in kinds", { capability_tiers: ["light"], kinds: ["code"], models: { m1: { tier: { poetry: "light" } } } },
@@ -109,7 +111,7 @@ test("unknown output parser stops every command", () => {
   const s = scratchConfig(config);
   const result = runCli(["-a", "one", "hello"], s.env);
   assert.equal(result.status, 2);
-  assert.equal(result.stderr, "[ask-agent] config: agents.plain.output: unknown output: xml (use text, agy-json or opencode-events)\n");
+  assert.equal(result.stderr, "[ask-agent] config: agents.plain.output: unknown output: xml (use text, agy-json, opencode-events or claude-json)\n");
 });
 
 test("a duplicate agent in a role is not an error and is tried once", () => {

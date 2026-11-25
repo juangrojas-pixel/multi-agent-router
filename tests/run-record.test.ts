@@ -133,3 +133,67 @@ test("gentle-shell with a config model and no -m passes --model after --", () =>
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "--\n-p\n--no-session\n--model\nopenai-codex/gpt-x-sol\nhello\n");
 });
+
+function printConfig(output: string, model = "m1"): AnyConfig {
+  const config = baseConfig() as AnyConfig;
+  config.agents.p = { enabled: true, command: fixture("stub-print"), timeout_seconds: 5, model, args: ["{prompt}"], output };
+  return config;
+}
+
+test("claude-json answers .result and records the reported model and tokens", () => {
+  const s = scratchConfig(printConfig("claude-json", "haiku"));
+  const out = JSON.stringify({ type: "result", result: "OK", total_cost_usd: 0.01, usage: { input_tokens: 2, output_tokens: 4 },
+    modelUsage: { "claude-haiku-5-5": { outputTokens: 4 } } });
+  const result = runCli(["-a", "p", "hello"], { ...s.env, STUB_OUTPUT: out });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "OK\n");
+  const [row] = runs(s.root);
+  assert.equal(row.model, "claude-haiku-5-5");
+  assert.equal(row.requested_model, "");
+  assert.equal(row.model_source, "reported");
+  assert.equal(row.tokens_in, 2);
+  assert.equal(row.tokens_out, 4);
+});
+
+test("claude-json with is_error gives no answer", () => {
+  const s = scratchConfig(printConfig("claude-json"));
+  const out = JSON.stringify({ type: "result", is_error: true, result: "boom" });
+  const result = runCli(["-a", "p", "hello"], { ...s.env, STUB_OUTPUT: out });
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+});
+
+test("agy-json and opencode-events record tokens; the model stays requested", () => {
+  const agy = scratchConfig(printConfig("agy-json"));
+  const agyOut = JSON.stringify({ status: "SUCCESS", response: "OK\n", usage: { input_tokens: 10, output_tokens: 1, thinking_tokens: 3 } });
+  assert.equal(runCli(["-a", "p", "hi"], { ...agy.env, STUB_OUTPUT: agyOut }).status, 0);
+  const [a] = runs(agy.root);
+  assert.deepEqual([a.model, a.model_source, a.tokens_in, a.tokens_out], ["m1", "requested", 10, 4]);
+
+  const oc = scratchConfig(printConfig("opencode-events"));
+  const ocOut = [
+    { type: "text", part: { type: "text", text: "OK" } },
+    { type: "step_finish", part: { type: "step-finish", tokens: { input: 30, output: 3, reasoning: 21 } } },
+  ].map((x) => JSON.stringify(x)).join("\n");
+  assert.equal(runCli(["-a", "p", "hi"], { ...oc.env, STUB_OUTPUT: ocOut }).status, 0);
+  const [o] = runs(oc.root);
+  assert.deepEqual([o.model_source, o.tokens_in, o.tokens_out], ["requested", 30, 24]);
+});
+
+test("text output records no token fields", () => {
+  const s = scratchConfig(printConfig("text"));
+  assert.equal(runCli(["-a", "p", "hi"], { ...s.env, STUB_OUTPUT: "OK" }).status, 0);
+  const [row] = runs(s.root);
+  assert.equal("tokens_in" in row, false);
+  assert.equal(row.model_source, "requested");
+});
+
+test("a config-sourced empty catalog entry does not block -m on an agent without config models", () => {
+  const s = scratchConfig(argvConfig({ models: undefined }));
+  writeCatalog(s.root, {
+    agents: { argv: { fetched_at: "2026-11-25T00:00:00.000Z", source: "config", models: [] } },
+  });
+  const result = runCli(["-a", "argv", "-m", "anything", "hello"], s.env);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "--model\nanything\nhello\n");
+});

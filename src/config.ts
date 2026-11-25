@@ -6,7 +6,7 @@ export type Agent = {
   extra_args?: string[]; prompt_preamble?: string; fallback?: string[]; quota?: { group: string; min_remaining: number };
   args?: string[]; model_args?: string[]; effort_args?: string[];
   models?: string[]; effort_levels?: string[];
-  output?: "text" | "agy-json" | "opencode-events";
+  output?: "text" | "agy-json" | "opencode-events" | "claude-json";
   backend?: string;
   // Agentic dispatcher (specs/002-agentic-dispatcher/data-model.md).
   list_models?: { cmd: string[]; parse: string; timeout_seconds?: number };
@@ -26,7 +26,7 @@ export type Config = {
   benchmarks?: { max_age_days?: number; sources?: Array<{ id: string; url: string; parse: string }> };
 };
 
-const outputs = ["text", "agy-json", "opencode-events"];
+const outputs = ["text", "agy-json", "opencode-events", "claude-json"];
 export const listParsers = ["tsv", "lines-first-field", "pi-table"];
 export const benchmarkParsers = ["models-dev", "lmarena-hf", "openrouter", "artificial-analysis"];
 
@@ -39,7 +39,7 @@ export function validateConfig(config: Config): string | null {
   const agents = config.agents ?? {};
   for (const [id, agent] of Object.entries(agents)) {
     if (agent.output !== undefined && !outputs.includes(agent.output)) {
-      return `agents.${id}.output: unknown output: ${agent.output} (use text, agy-json or opencode-events)`;
+      return `agents.${id}.output: unknown output: ${agent.output} (use text, agy-json, opencode-events or claude-json)`;
     }
     if (agent.list_models) {
       if (badCommand(agent.list_models.cmd)) return `agents.${id}.list_models.cmd: must start with a non-empty command`;
@@ -74,7 +74,7 @@ export function validateConfig(config: Config): string | null {
 
 function validateDispatcher(config: Config): string | null {
   const tiers = config.capability_tiers;
-  if (tiers !== undefined && (!Array.isArray(tiers) || tiers.length === 0 || new Set(tiers).size !== tiers.length)) {
+  if (tiers !== undefined && (!Array.isArray(tiers) || tiers.length === 0 || new Set(tiers).size !== tiers.length || tiers.some((name) => typeof name !== "string" || !name))) {
     return "capability_tiers: must be a non-empty list of unique names";
   }
   for (const [model, facts] of Object.entries(config.models ?? {})) {

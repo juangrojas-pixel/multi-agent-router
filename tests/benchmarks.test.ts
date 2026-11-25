@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { test, type TestContext } from "node:test";
 import { baseConfig, runCli, scratchConfig } from "./fixtures/helpers.ts";
@@ -35,7 +35,11 @@ function setup(t: TestContext) {
   config.benchmarks.sources[1].url = pathToFileURL(arena).href;
   writeFileSync(scratch.config, JSON.stringify(config));
   const cachePath = join(scratch.env.XDG_CACHE_HOME!, "multi-agent-router", "benchmarks.json");
-  return { arena, cachePath, run(...args: string[]) {
+  return { arena, cachePath, useArena(url: string, env: NodeJS.ProcessEnv) {
+    config.benchmarks.sources[1].url = url;
+    writeFileSync(scratch.config, JSON.stringify(config));
+    Object.assign(scratch.env, env);
+  }, run(...args: string[]) {
     const result = runCli(["catalog", ...args], scratch.env);
     assert.equal(result.stderr, "");
     assert.equal(result.status, 0);
@@ -86,6 +90,75 @@ test("unreachable source preserves its cached scores and date, with no backgroun
   assert.deepEqual(current.sources.arena, { fetched_at: previous.sources.arena.fetched_at, status: "stale", error: "ENOENT" });
   assert.ok(text.includes(`arena ${previous.sources.arena.fetched_at.slice(0, 10)} stale`));
   assert.ok(text.includes("gemini-4-neon-xhigh  code=light*  review=light  $out/M=15"));
+});
+
+test("an empty Arena refresh keeps the last usable scores and date", (t) => {
+  const s = setup(t);
+  const before = JSON.parse(s.run("--refresh", "--json")).agents.one.models;
+  const text = s.run().split("\n").slice(1).join("\n");
+  writeFileSync(s.arena, JSON.stringify({ rows: [] }));
+  assert.equal(s.run("--refresh").split("\n").slice(1).join("\n"), text.replace(/(arena \S+) fresh/, "$1 stale"));
+  assert.deepEqual(JSON.parse(s.run("--json")).agents.one.models, before);
+});
+
+function setupPagination(t: TestContext, total: number) {
+  const s = setup(t);
+  const requests = join(dirname(s.arena), "requests.txt");
+  s.useArena(`https://datasets-server.huggingface.co/filter?offset=2&length=1&where=coding&total=${total}`, {
+    NODE_OPTIONS: `--import=${new URL("./fixtures/p11a-hf-pagination.mjs", import.meta.url).href}`,
+    P11A_HF_REQUESTS: requests,
+  });
+  return { ...s, requests: () => readFileSync(requests, "utf8") };
+}
+
+test("catalog follows Hugging Face pages and includes the best score from the last page", (t) => {
+  const s = setupPagination(t, 10);
+  const output = JSON.parse(s.run("--refresh", "--json"));
+  assert.deepEqual(output.agents.one.models[1].profile.scores, {
+    code: { rank: 2, rating: 1500, source: "arena", date: "2026-11-22" },
+  });
+  assert.equal(s.requests(), Array.from({ length: 8 }, (_, i) => `/filter ${i + 2} 1\n`).join(""));
+  assert.match(s.run(), /arena \S+ fresh/);
+});
+
+test("catalog rejects an Arena response requiring more than 100 pages without fetching follow-ups", (t) => {
+  const s = setupPagination(t, 103);
+  const output = JSON.parse(s.run("--refresh", "--json"));
+  assert.equal(output.agents.one.models[1].profile.scores, undefined);
+  assert.equal(s.requests(), "/filter 2 1\n");
+  assert.match(s.run(), /arena - failed/);
+});
+
+function epochCatalog(t: TestContext, fixture: URL, file: string, model: string, score_bands?: Record<string, number>) {
+  const base = baseConfig() as { agents: { one: Record<string, unknown> } };
+  const s = scratchConfig({ ...base, agents: { one: { ...base.agents.one, models: [model] } },
+    capability_tiers: ["light", "frontier"], kinds: ["code"], benchmarks: { sources: [{
+      id: "epoch", parse: "epoch-zip", url: fixture.href, score_bands,
+      files: { code: { file, model_column: "Model version", score_column: "Score" } },
+    }] } });
+  t.after(() => rmSync(s.root, { recursive: true, force: true }));
+  return (...args: string[]) => {
+    const result = runCli(["catalog", ...args], s.env);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    return result.stdout;
+  };
+}
+
+test("Epoch publishes a score but no measured tier when score bands are absent or empty", (t) => {
+  for (const bands of [undefined, {}]) {
+    const run = epochCatalog(t, new URL("epoch.zip", fixtures), "frontierswe_external.csv", "claude-opus-5-5", bands);
+    assert.deepEqual(JSON.parse(run("--refresh", "--json")).agents.one.models[0].profile, {
+      tier: {}, tier_source: {}, scores: { code: { score: 0.61, date: "2026-11-20", source: "epoch" } },
+    });
+    assert.match(run(), /epoch \S+ fresh/);
+  }
+});
+
+test("Epoch rejects a requested basename that identifies multiple ZIP entries", (t) => {
+  const run = epochCatalog(t, new URL("./fixtures/p11a-duplicate-basename.zip", import.meta.url), "scores.csv", "model-test", { frontier: 0.6 });
+  assert.equal(JSON.parse(run("--refresh", "--json")).agents.one.models[0].profile, null);
+  assert.match(run(), /epoch - failed/);
 });
 
 test("Epoch ZIP measures code first, with per-kind fallback and declared overrides", (t) => {

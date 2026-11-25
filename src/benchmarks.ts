@@ -20,6 +20,7 @@ export type BenchmarkProfile = {
 };
 type Snapshot = { status: SourceStatus; models?: Models; parse: string };
 const cacheName = "benchmarks.json";
+const maxArenaPages = 100;
 // Keep independent contributions so a stale source can be recombined with fresh ones,
 // including values hidden by precedence in the public cache.
 const snapshotsName = "benchmark-sources.json";
@@ -106,53 +107,64 @@ function arrayModels(payload: { data?: PriceEntry[] }, source: Source): Models {
       if (typeof entry?.id !== "string" || typeof completion !== "string" || !completion.trim()) continue;
       const price = Number(completion) * 1_000_000;
       if (number(price)) models[normalize(entry.id)] = { price_out_per_m: price, price_source: source.id };
-    } else if (typeof entry?.slug === "string" && number(entry.median_output_tokens_per_second)) {
+    } else if (source.parse === "artificial-analysis" && typeof entry?.slug === "string" && number(entry.median_output_tokens_per_second)) {
       models[normalize(entry.slug)] = { output_tokens_per_second: entry.median_output_tokens_per_second, speed_source: source.id };
     }
   }
   return models;
 }
 
+// ZIP fixed header sizes and field offsets (before variable-length fields).
+const zipEnd = { size: 22, signature: 0x06054b50, diskNumbers: 4, diskCount: 8, count: 10, directorySize: 12, directoryOffset: 16, commentLength: 20 };
+const zipDirectory = { size: 46, signature: 0x02014b50, flags: 8, method: 10, crc: 16, compressedSize: 20,
+  uncompressedSize: 24, nameLength: 28, extraLength: 30, commentLength: 32, localOffset: 42 };
+const zipLocal = { size: 30, signature: 0x04034b50, method: 8, nameLength: 26, extraLength: 28 };
+
 function zipEntries(zip: Buffer) {
   // The EOCD can be followed by a ZIP comment of up to 65535 bytes.
-  let end = zip.length - 22;
-  for (; end >= Math.max(0, zip.length - 22 - 0xffff); end--) {
-    if (zip.readUInt32LE(end) === 0x06054b50 && end + 22 + zip.readUInt16LE(end + 20) === zip.length) break;
+  let end = zip.length - zipEnd.size;
+  const earliestEnd = Math.max(0, end - 0xffff);
+  for (; end >= earliestEnd; end--) {
+    if (zip.readUInt32LE(end) === zipEnd.signature && end + zipEnd.size + zip.readUInt16LE(end + zipEnd.commentLength) === zip.length) break;
   }
-  if (end < Math.max(0, zip.length - 22 - 0xffff)) throw new Error("missing ZIP directory");
-  const count = zip.readUInt16LE(end + 10);
-  const start = zip.readUInt32LE(end + 16);
-  if (zip.readUInt32LE(end + 4) !== 0 || zip.readUInt16LE(end + 8) !== count || start + zip.readUInt32LE(end + 12) !== end) {
+  if (end < earliestEnd) throw new Error("missing ZIP directory");
+  const count = zip.readUInt16LE(end + zipEnd.count);
+  const start = zip.readUInt32LE(end + zipEnd.directoryOffset);
+  if (zip.readUInt32LE(end + zipEnd.diskNumbers) !== 0 || zip.readUInt16LE(end + zipEnd.diskCount) !== count ||
+      start + zip.readUInt32LE(end + zipEnd.directorySize) !== end) {
     throw new Error("unsupported ZIP directory");
   }
-  const entries = new Map<string, number>();
+  const entries = new Map<string, number | null>();
   let offset = start;
   for (let i = 0; i < count; i++) {
-    if (offset + 46 > end || zip.readUInt32LE(offset) !== 0x02014b50) throw new Error("invalid ZIP directory entry");
-    const nameEnd = offset + 46 + zip.readUInt16LE(offset + 28);
-    const next = nameEnd + zip.readUInt16LE(offset + 30) + zip.readUInt16LE(offset + 32);
+    const nameStart = offset + zipDirectory.size;
+    if (nameStart > end || zip.readUInt32LE(offset) !== zipDirectory.signature) throw new Error("invalid ZIP directory entry");
+    const nameEnd = nameStart + zip.readUInt16LE(offset + zipDirectory.nameLength);
+    const next = nameEnd + zip.readUInt16LE(offset + zipDirectory.extraLength) + zip.readUInt16LE(offset + zipDirectory.commentLength);
     if (next > end) throw new Error("truncated ZIP directory entry");
-    const name = zip.toString("utf8", offset + 46, nameEnd).split("/").at(-1)!;
-    if (name && !entries.has(name)) entries.set(name, offset);
+    // Configured CSV names omit directories; refuse a lookup if the basename is ambiguous.
+    const name = zip.toString("utf8", nameStart, nameEnd).split("/").at(-1);
+    if (name) entries.set(name, entries.has(name) ? null : offset);
     offset = next;
   }
   return (name: string): string => {
     const entry = entries.get(name);
     if (entry === undefined) throw new Error("missing ZIP entry");
-    const method = zip.readUInt16LE(entry + 10);
+    if (entry === null) throw new Error("ambiguous ZIP entry");
+    const method = zip.readUInt16LE(entry + zipDirectory.method);
     if (method !== 0 && method !== 8) throw new Error("unsupported ZIP compression method");
-    const local = zip.readUInt32LE(entry + 42);
-    if (local + 30 > start || zip.readUInt32LE(local) !== 0x04034b50 ||
-        zip.readUInt16LE(local + 8) !== method || (zip.readUInt16LE(entry + 8) & 1)) {
+    const local = zip.readUInt32LE(entry + zipDirectory.localOffset);
+    if (local + zipLocal.size > start || zip.readUInt32LE(local) !== zipLocal.signature ||
+        zip.readUInt16LE(local + zipLocal.method) !== method || (zip.readUInt16LE(entry + zipDirectory.flags) & 1)) {
       throw new Error("invalid ZIP local header");
     }
-    const from = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
-    const to = from + zip.readUInt32LE(entry + 20);
-    const size = zip.readUInt32LE(entry + 24);
+    const from = local + zipLocal.size + zip.readUInt16LE(local + zipLocal.nameLength) + zip.readUInt16LE(local + zipLocal.extraLength);
+    const to = from + zip.readUInt32LE(entry + zipDirectory.compressedSize);
+    const size = zip.readUInt32LE(entry + zipDirectory.uncompressedSize);
     if (to > start || size > 64 * 1024 * 1024) throw new Error("ZIP entry exceeds bounds");
     const bytes = zip.subarray(from, to);
     const data = method === 0 ? bytes : inflateRawSync(bytes, { maxOutputLength: Math.max(size, 1) });
-    if (data.length !== size || crc32(data) !== zip.readUInt32LE(entry + 16)) throw new Error("corrupt ZIP entry");
+    if (data.length !== size || crc32(data) !== zip.readUInt32LE(entry + zipDirectory.crc)) throw new Error("corrupt ZIP entry");
     return data.toString("utf8");
   };
 }
@@ -184,6 +196,8 @@ function epochModels(zip: Buffer, source: Source, config: Config, date: string):
   const models: Models = Object.create(null);
   const extract = zipEntries(zip);
   const tiers = config.capability_tiers ?? [];
+  const bands = source.score_bands;
+  const hasBands = Object.keys(bands ?? {}).length > 0;
   for (const [kind, spec] of Object.entries(source.files ?? {})) {
     const rows = csvRows(extract(spec.file).replace(/^\uFEFF/, ""));
     const header = rows.next().value ?? [];
@@ -192,6 +206,7 @@ function epochModels(zip: Buffer, source: Source, config: Config, date: string):
     const dateColumn = header.findIndex((name) => /^(?:model )?release[ _]date$/i.test(name.trim()));
     if (modelColumn < 0 || scoreColumn < 0) throw new Error("missing benchmark CSV column");
     for (const row of rows) {
+      // Epoch appends an underscore-delimited run label to some model versions.
       const id = normalize(row[modelColumn]?.trim().replace(/_\w+$/, "") ?? "");
       const value = row[scoreColumn]?.trim();
       const score = Number(value);
@@ -201,7 +216,8 @@ function epochModels(zip: Buffer, source: Source, config: Config, date: string):
       const existing = own(scores, kind);
       if (existing?.score !== undefined && existing.score >= score) continue;
       scores[kind] = { score, source: source.id, date: row[dateColumn]?.trim() || date };
-      const tier = tiers.findLast((name) => score >= (own(source.score_bands, name) ?? Infinity)) ?? tiers[0];
+      if (!hasBands) continue;
+      const tier = tiers.findLast((name) => score >= (own(bands, name) ?? Infinity)) ?? tiers[0];
       if (tier !== undefined) (model.tier ??= Object.create(null))[kind] = tier;
     }
   }
@@ -241,6 +257,8 @@ async function fetchModels(source: Source, config: Config, date: string): Promis
     const start = Number(url.searchParams.get("offset") ?? 0);
     const length = payload.rows.length;
     const total = payload.num_rows_total;
+    // Reject oversized snapshots before issuing follow-ups; partial rankings are not fresh data.
+    if (length > 0 && Math.ceil((total - start) / length) > maxArenaPages) throw new Error("LMArena page limit exceeded");
     for (let offset = start + length; length > 0 && offset < total; offset += length * 6) {
       const pages = await Promise.all(Array.from({ length: Math.min(6, Math.ceil((total - offset) / length)) }, (_, i) => {
         const page = new URL(url);
@@ -254,7 +272,9 @@ async function fetchModels(source: Source, config: Config, date: string): Promis
       }
     }
   }
-  return arenaModels(rows, source, config, date);
+  const models = arenaModels(rows, source, config, date);
+  if (Object.keys(models).length === 0) throw new Error("no usable LMArena scores");
+  return models;
 }
 
 export function benchmarkCache(config: Config): BenchmarkCache {
@@ -297,10 +317,12 @@ export async function refreshBenchmarks(config: Config): Promise<BenchmarkCache>
       const { scores, tier, ...metadata } = value;
       Object.assign(model, metadata);
       for (const [kind, score] of Object.entries(scores ?? {})) {
+        // The first source with a measured tier owns the score and tier for this kind.
         if (own(model.tier, kind) !== undefined) continue;
         const measuredTier = own(tier, kind);
         const existing = own(model.scores, kind);
-        if (measuredTier !== undefined || !existing || (score.rank !== undefined && existing.rank !== undefined && score.rank < existing.rank)) {
+        const improvesRank = score.rank !== undefined && existing?.rank !== undefined && score.rank < existing.rank;
+        if (measuredTier !== undefined || !existing || improvesRank) {
           (model.scores ??= Object.create(null))[kind] = score;
         }
         if (measuredTier !== undefined) (model.tier ??= Object.create(null))[kind] = measuredTier;

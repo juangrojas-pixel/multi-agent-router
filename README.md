@@ -125,6 +125,36 @@ Candidates are ordered by lowest `est_cost` (`price_out_per_m * sizes[size] / 1e
 
 `--client` restricts candidates to agents listed in `client_agents` from the private policy file (fail-closed when absent). `-n N` limits results (default `5`); `--json` prints the array of `{ agent, model, tier, tier_source, est_cost, quota_left, over_ceiling, reason }` objects. Exit codes: `0` at least one candidate, `4` none meets the need (prints the best model below `TIER` on stderr when any model has a tier for `KIND`) or no agent allowed for `--client`, `2` invalid usage or unknown `KIND`, `TIER`, or `size`.
 
+### Dispatch (swarm)
+
+`ask-agent dispatch [-f FILE | -] [--json]` runs a batch of distinct tasks concurrently, each in its own child router process, up to `dispatch.concurrency` at once (default `3`; excess tasks queue in order, none dropped). Before any task starts, the whole batch is validated: JSON syntax and required fields (`id`, `cwd`, `prompt`, and exactly one of `agent` or `role`), unknown agent or role, model usability via `catalog.json` or config `models`, duplicate task IDs, overlapping `writes` paths (resolved against each task's `cwd` by path prefix), and `client: true` tasks against `client_agents` in private policy (fail-closed when absent; role tasks check every agent of the role). Any validation error exits `2` naming the task and key without starting an agent.
+
+```json
+{
+  "batch_id": "b-feature-docs",
+  "tasks": [
+    {
+      "id": "impl",
+      "agent": "agy",
+      "model": "gemini-4-neon-high",
+      "cwd": "/path/to/repo",
+      "writes": ["src/dispatch.ts"],
+      "prompt": "Implement batch dispatch.",
+      "reason": "strong code tier"
+    },
+    {
+      "id": "docs",
+      "role": "docs",
+      "cwd": "/path/to/repo",
+      "writes": ["README.md"],
+      "prompt": "Document the dispatch command."
+    }
+  ]
+}
+```
+
+Role tasks fall back along their role order; agent tasks run only the named agent unless `fallback: true`, which uses the agent's config `fallback` list. Every attempt is recorded in `runs.jsonl` with `task_id`, `reason` (when given), and a shared `batch_id` (generated as `b-<epoch>-<pid>` when omitted). Output prints one `### <task_id> (<agent or role>/<model or default>)` block per task in task order (or `_(no answer: ...)_` on failure), followed by each child's stderr in task order; `--json` prints `[{ task_id, agent, role, model, exit, seconds, answer }]`. Exit codes: `0` all tasks succeeded, `5` some failed (other receipts still returned), `2` validation or usage error before start.
+
 ### Preflight
 
 `ask-agent preflight [--json]` checks the installed and latest CLI versions for enabled agents, refreshes the model catalog, and reports model counts by status, the lowest known quota per agent, and benchmark cache freshness. Missing or failed version lookups show `unknown`; benchmark freshness is checked locally, with no benchmark download. Without benchmark configuration, it shows `not configured`.

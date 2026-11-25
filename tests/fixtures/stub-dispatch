@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+prompt="${@: -1}"
+if [[ -n "${STUB_MARKER:-}" ]]; then
+  printf 'start %s %s\n' "$(date +%s%3N)" "$prompt" >> "$STUB_MARKER"
+fi
+if [[ -n "${STUB_SLEEP:-}" && "${STUB_SLEEP}" != "0" ]]; then
+  sleep "$STUB_SLEEP"
+fi
+if [[ -n "${STUB_MARKER:-}" ]]; then
+  printf 'end %s %s\n' "$(date +%s%3N)" "$prompt" >> "$STUB_MARKER"
+fi
+if [[ "$prompt" == *FAIL* ]]; then
+  printf 'stub failed: %s\n' "$prompt" >&2
+  exit 1
+fi
+printf '%s\n' "$prompt"

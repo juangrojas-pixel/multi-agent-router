@@ -19,6 +19,9 @@
     "l": 250000
   },
   "cost_ceiling": 5,
+  "dispatch": {
+    "concurrency": 3
+  },
   "model_aliases": {
     "haiku": "claude-haiku-5-5",
     "sonnet": "claude-sonnet-5-5",

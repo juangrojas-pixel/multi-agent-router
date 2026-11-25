@@ -58,6 +58,13 @@ function address(output: string): string {
   }
 }
 
+// `<agent>-<task or model>-<pid>`: readable in the Herdr app, unique among live terminals.
+export function terminalName(agentId: string, label = ""): string {
+  const suffix = `-${process.pid}`;
+  const base = `${agentId}-${label}`.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return `${base.slice(0, 32 - suffix.length).replace(/-$/, "")}${suffix}`;
+}
+
 // Runs `command args` inside a live hc terminal that `hc attach NAME` shows while it works. The
 // terminal hangs under the caller's terminal (no --no-parent), so the Herdr app lists it under
 // the orchestrator; --no-notify keeps hc from typing notes into the caller.
@@ -74,10 +81,7 @@ export async function hcRun(
   label = "",
   banner = "",
 ): Promise<ProcessResult> {
-  // `<agent>-<task or model>-<pid>`: readable in the Herdr app, unique among live terminals.
-  const suffix = `-${process.pid}`;
-  const base = `${agentId}-${label}`.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  const name = `${base.slice(0, 32 - suffix.length).replace(/-$/, "")}${suffix}`;
+  const name = terminalName(agentId, label);
   const dir = mkdtempSync(join(tmpdir(), "ask-agent-hc-"));
   const env = { ...process.env, ASK_AGENT_DEPTH: "1" };
   writeFileSync(join(dir, "env"), Object.entries(env).map(([key, value]) => `${key}=${value}\0`).join(""));

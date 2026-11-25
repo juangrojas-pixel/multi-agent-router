@@ -186,6 +186,29 @@
         ],
         "parse": "pi-table",
         "timeout_seconds": 60
+      },
+      "live": {
+        "args": [
+          "{model_args}"
+        ],
+        "model_args": [
+          "--model",
+          "{model}"
+        ],
+        "dialogs": [
+          {
+            "match": "Trust this folder?",
+            "keys": [
+              "enter"
+            ]
+          },
+          {
+            "match": "Silence Pi's builtin codemode warning?",
+            "keys": [
+              "enter"
+            ]
+          }
+        ]
       }
     },
     "agy": {
@@ -217,6 +240,23 @@
       "quota_groups": {
         "gemini-*": "Gemini Models",
         "*": "Claude and GPT models"
+      },
+      "live": {
+        "args": [
+          "{model_args}"
+        ],
+        "model_args": [
+          "--model",
+          "{model}"
+        ],
+        "dialogs": [
+          {
+            "match": "Trust this folder?",
+            "keys": [
+              "enter"
+            ]
+          }
+        ]
       }
     },
     "opencode": {
@@ -277,6 +317,30 @@
         ],
         "parse": "pi-table",
         "timeout_seconds": 120
+      },
+      "live": {
+        "args": [
+          "{model_args}"
+        ],
+        "model_args": [
+          "--",
+          "--model",
+          "{model}"
+        ],
+        "dialogs": [
+          {
+            "match": "Trust this folder?",
+            "keys": [
+              "enter"
+            ]
+          },
+          {
+            "match": "Silence Pi's builtin codemode warning?",
+            "keys": [
+              "enter"
+            ]
+          }
+        ]
       }
     },
     "claude": {
@@ -315,6 +379,23 @@
         "opus"
       ],
       "shares_quota_with": "orchestrator",
+      "live": {
+        "args": [
+          "{model_args}"
+        ],
+        "model_args": [
+          "--model",
+          "{model}"
+        ],
+        "dialogs": [
+          {
+            "match": "Do you trust the files in this folder?",
+            "keys": [
+              "enter"
+            ]
+          }
+        ]
+      },
       "description": "Claude Code in print mode; explicit use only (-a claude -m haiku|sonnet|opus), never in tiers or roles; shares the orchestrator quota"
     }
   },

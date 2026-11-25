@@ -1,0 +1,206 @@
+#!/usr/bin/env node
+// Stand-in for hc (herdr-core) covering both interactive `live` runs and `hcRun` fallback.
+// Records every call as a JSON array line in $STUB_HC_LOG.
+// Keeps per-terminal state in $STUB_HC_STATE/<addr>.json.
+// Simulates statuses from $STUB_LIVE_SCRIPT (comma-separated: state or state:msg).
+// On `send`, writes "ANSWER: <first 20 chars of task>" into the answer file path found in the text
+// unless $STUB_LIVE_NO_ANSWER=1.
+import { spawn } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+const stateDir = process.env.STUB_HC_STATE;
+if (!stateDir) {
+  process.stderr.write("STUB_HC_STATE is required\n");
+  process.exit(1);
+}
+mkdirSync(stateDir, { recursive: true });
+
+const argv = process.argv.slice(2);
+if (process.env.STUB_HC_LOG) {
+  appendFileSync(process.env.STUB_HC_LOG, `${JSON.stringify(argv)}\n`);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function stateFile(addr) {
+  return join(stateDir, `${addr}.json`);
+}
+
+function readState(addr) {
+  try {
+    return JSON.parse(readFileSync(stateFile(addr), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeState(addr, data) {
+  writeFileSync(stateFile(addr), JSON.stringify(data));
+}
+
+function nextAddr() {
+  const counterFile = join(stateDir, "next");
+  const next = existsSync(counterFile) ? Number(readFileSync(counterFile, "utf8").trim()) + 1 : 1;
+  writeFileSync(counterFile, String(next));
+  return `t${next}`;
+}
+
+function parseScript(raw) {
+  if (!raw) return [];
+  return raw.split(",").filter(Boolean).map((entry) => {
+    const colon = entry.indexOf(":");
+    if (colon === -1) return { state: entry.trim(), msg: entry.trim() === "done" ? "DONE" : "" };
+    return { state: entry.slice(0, colon).trim(), msg: entry.slice(colon + 1) };
+  });
+}
+
+const sub = argv[0];
+
+if (sub === "run") {
+  if (process.env.STUB_HC_FAIL) {
+    process.stderr.write(`${process.env.STUB_HC_FAIL}\n`);
+    process.exit(1);
+  }
+  const sep = argv.indexOf("--");
+  const cmdArgs = sep === -1 ? [] : argv.slice(sep + 1);
+  const nameIdx = argv.indexOf("--name");
+  const name = nameIdx !== -1 ? argv[nameIdx + 1] : "";
+  const addr = nextAddr();
+
+  // Detect hcRun wrapper: bash <dir>/run <dir> <command> ...
+  if (cmdArgs[0] === "bash" && typeof cmdArgs[1] === "string" && cmdArgs[1].endsWith("/run") && cmdArgs[2]) {
+    const dir = cmdArgs[2];
+    const child = spawn(cmdArgs[0], cmdArgs.slice(1), { detached: true, stdio: "ignore" });
+    child.unref();
+    writeState(addr, { mode: "hc", name, dir, pid: child.pid });
+    process.stdout.write(`${JSON.stringify({ address: addr })}\n`);
+    process.exit(0);
+  }
+
+  writeState(addr, {
+    mode: "live",
+    name,
+    command: cmdArgs[0] ?? "",
+    args: cmdArgs.slice(1),
+    state: "live",
+    exitCode: null,
+    statusState: "working",
+    statusMsg: "",
+    turn: 0,
+    index: -1,
+    script: parseScript(process.env.STUB_LIVE_SCRIPT ?? ""),
+  });
+  process.stdout.write(`${JSON.stringify({ address: addr })}\n`);
+  process.exit(0);
+}
+
+if (sub === "wait") {
+  const addr = argv[1];
+  const timeoutIdx = argv.indexOf("--timeout");
+  const timeoutSec = timeoutIdx !== -1 ? Number(argv[timeoutIdx + 1]) || 1 : 1;
+  const s = readState(addr);
+  if (!s) process.exit(1);
+
+  if (s.mode === "hc") {
+    const rcFile = join(s.dir, "rc");
+    const deadline = Date.now() + timeoutSec * 1000;
+    while (Date.now() < deadline) {
+      if (existsSync(rcFile) && readFileSync(rcFile, "utf8").trim() !== "") break;
+      await sleep(50);
+    }
+    process.stdout.write("{}\n");
+    process.exit(0);
+  }
+
+  if (process.env.STUB_LIVE_WAIT_MS) {
+    await sleep(Math.min(Number(process.env.STUB_LIVE_WAIT_MS) || 0, timeoutSec * 1000));
+  }
+  if (s.index + 1 < s.script.length) {
+    s.index += 1;
+    s.turn += 1;
+    s.statusState = s.script[s.index].state;
+    s.statusMsg = s.script[s.index].msg;
+    writeState(addr, s);
+    process.stdout.write(`${JSON.stringify({ status: s.statusState, reason: "status", turn: s.turn })}\n`);
+    process.exit(0);
+  }
+  // End of script: hold until wait timeout expires (simulates hanging / working past deadline).
+  await sleep(timeoutSec * 1000);
+  process.stdout.write(`${JSON.stringify({ status: s.statusState, reason: "timeout", turn: s.turn })}\n`);
+  process.exit(0);
+}
+
+if (sub === "get") {
+  const addr = argv[1];
+  const s = readState(addr);
+  if (!s) {
+    process.stdout.write(`${JSON.stringify({ state: "finished" })}\n`);
+    process.exit(0);
+  }
+  if (s.mode === "hc") {
+    let alive = false;
+    try {
+      process.kill(s.pid, 0);
+      alive = true;
+    } catch {}
+    process.stdout.write(`${JSON.stringify({ state: alive ? "live" : "finished" })}\n`);
+    process.exit(0);
+  }
+  process.stdout.write(`${JSON.stringify({
+    state: s.state,
+    exit_code: s.exitCode,
+    status: { app: "stub", state: s.statusState, msg: s.statusMsg },
+  })}\n`);
+  process.exit(0);
+}
+
+if (sub === "keys") {
+  process.exit(0);
+}
+
+if (sub === "send") {
+  const addr = argv[1];
+  const text = argv[2] ?? "";
+  const s = readState(addr);
+  if (!s) process.exit(1);
+  if (process.env.STUB_LIVE_NO_ANSWER !== "1") {
+    const match = text.match(/write your complete final answer to (\S+)/);
+    if (match) {
+      writeFileSync(match[1], `ANSWER: ${text.slice(0, 20)}`);
+    }
+  }
+  process.exit(0);
+}
+
+if (sub === "interrupt") {
+  const addr = argv[1];
+  if (process.env.STUB_LIVE_INTERRUPT_FAIL === "1") process.exit(1);
+  const s = readState(addr);
+  if (s && s.mode === "live") {
+    s.statusState = "idle";
+    writeState(addr, s);
+  }
+  process.exit(0);
+}
+
+if (sub === "kill") {
+  const addr = argv[1];
+  const s = readState(addr);
+  if (s?.mode === "hc" && s.pid) {
+    try { process.kill(-s.pid, "SIGTERM"); } catch {}
+  } else if (s?.mode === "live") {
+    s.state = "finished";
+    s.exitCode = 143;
+    writeState(addr, s);
+  }
+  process.exit(0);
+}
+
+if (sub === "rm") {
+  process.exit(0);
+}
+
+process.exit(0);

@@ -184,10 +184,21 @@ It needs the orchestrator itself inside a Herdr pane (`HERDR_ENV=1`): from anoth
 
 `--backend hc` runs each agent inside a live [hc](https://herdr.dev) terminal instead of a plain subprocess. When no backend is set, a router that itself runs inside an hc terminal (the Herdr app, `HC_TERMINAL_SOCKET` set) uses hc automatically, so every delegated agent shows in the app's Agents list under the orchestrator that sent it; elsewhere the default stays a subprocess. Terminals are named `<agent>-<task or model>-<pid>` (for example `agy-p7-41233`). While it works, `hc attach <name>` (printed on stderr) shows the agent live; `ctrl+\` detaches. The answer, stderr, exit code, quota detection and per-agent timeout behave exactly like the subprocess backend, and the terminal is removed when the run ends.
 
-- Selection: `--backend hc|subprocess` flag, then `agents.<name>.backend`, then the global `backend` in `agents.json`, then `subprocess`. It applies to `-a`, `-t`, `-r` and `parallel` runs alike.
+- Selection: `--backend hc|herdr|live|subprocess` flag, then `agents.<name>.backend`, then the global `backend` in `agents.json`, then `hc` inside an hc terminal or `subprocess` elsewhere. It applies to `-a`, `-t`, `-r` and `parallel` runs alike.
 - `hc_command` in `agents.json` sets the hc binary (default `hc`).
 - When hc cannot start the terminal, the run falls back to the subprocess backend and logs `falling back to subprocess`.
 - Terminals start with `--no-notify` and keep the caller's terminal as parent: they hang under the orchestrator in the Herdr app, and hc never types notes into the caller's terminal.
+
+### live backend (watch agents in the Herdr app)
+
+`--backend live` (or `backend: "live"` in `agents.json`) runs each delegated agent in its own interactive TUI inside an hc terminal under the caller, so the Herdr app shows it with its icon and live status (`working`, `done`, `blocked`) and you can open it, watch every step and type to it directly.
+
+- Each agent that supports live mode declares a `live` object in `agents.json`: `args` (array of strings, e.g. `["{model_args}"]`), optional `model_args` (e.g. `["--model", "{model}"]`, or `["--", "--model", "{model}"]` for `gentle-shell`), and optional `dialogs` (`[{ "match": "...", "keys": ["enter"] }]`).
+- The router resolves the agent command to an absolute path from its own `PATH`, starts the TUI with `hc run --bg --json --no-notify --name <agent>-<task or model>-<pid> --cwd <dir> --label ask-agent=1 -- <abs-path> <args>`, and logs `running <agent> live in hc terminal <name>`.
+- Startup dialogs whose `status.msg` contains a configured `match` are answered via `hc keys` (at most 3 times per dialog). Any other `blocked` state stops the run with exit `2`, prints `[ask-agent] <agent> is waiting for you in hc terminal <name>: <msg>`, and leaves the terminal open for you.
+- On first `idle`, the router sends the task via `hc send` with an instruction to write the final answer to a temporary answer file and reply `DONE`. When the agent reaches `done` (or `idle` after the send), the router reads that answer file (falling back to the last `status.msg` with a stderr note if missing), records the requested model (`model_source: requested`), and leaves the terminal open (`<agent> answered; its terminal <name> stays open in the Herdr app`).
+- On `error` status the run records exit `1` with its message; on timeout the router interrupts (or kills) the terminal and records exit `142`. Live terminals are never removed with `hc rm`.
+- Agents without a `live` config (such as `opencode`, whose TUI has no model flag) fall back to the `hc` backend with `<agent> has no live config, using hc`. When hc itself cannot start a terminal, the run falls back to `subprocess`.
 
 ## Install (local)
 

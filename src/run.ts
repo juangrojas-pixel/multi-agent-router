@@ -4,6 +4,7 @@ import { buildAgent, commandArgs, parseMeta, parseOutput } from "./agents.ts";
 import type { Config } from "./config.ts";
 import { hcRun, type ProcessResult } from "./hc.ts";
 import { herdrRun } from "./herdr.ts";
+import { liveRun } from "./live.ts";
 import { changedFiles, cooldown, gitSnapshot, readCache, record, setCooldown } from "./state.ts";
 
 // A refusal of one model (not the agent's quota): that run fails, the agent stays available.
@@ -199,17 +200,48 @@ async function execute(
   const hc = (config as Config & { hc_command?: string }).hc_command || "hc";
   const backend = backendFor(id, config);
   const herdr = (config as Config & { herdr_command?: string }).herdr_command || "herdr";
-  const result = backend === "hc"
-    ? await hcRun(hc, id, agent.command, args, timeoutSeconds, subprocess, runContext.task || model, terminalBanner(id, model, prompt))
-    : backend === "herdr"
-      ? await herdrRun({ herdr, agentId: id, model, task: runContext.task, command: agent.command, args, timeoutSeconds }, subprocess)
-      : await subprocess();
+  const hcFallback = () => hcRun(hc, id, agent.command, args, timeoutSeconds, subprocess, runContext.task || model, terminalBanner(id, model, prompt));
+  let usedLive = false;
+  let result: ProcessResult;
+  if (backend === "live") {
+    if (agent.live) {
+      const liveResult = await liveRun({
+        hc,
+        agentId: id,
+        command: agent.command,
+        agent,
+        live: agent.live,
+        task,
+        model,
+        effort,
+        defaultModelArgs: built.model_args,
+        timeoutSeconds,
+        label: runContext.task || model,
+      });
+      if (liveResult) {
+        result = liveResult;
+        usedLive = true;
+      } else {
+        result = await subprocess();
+      }
+    } else {
+      process.stderr.write(`[ask-agent] ${id} has no live config, using hc\n`);
+      result = await hcFallback();
+    }
+  } else if (backend === "hc") {
+    result = await hcFallback();
+  } else if (backend === "herdr") {
+    result = await herdrRun({ herdr, agentId: id, model, task: runContext.task, command: agent.command, args, timeoutSeconds }, subprocess);
+  } else {
+    result = await subprocess();
+  }
   const seconds = Math.floor((Date.now() - started) / 1000);
   const output = `${result.stdout}${result.stderr}`;
   // The bash router's view of the output: stdout, a newline, stderr, trailing newlines dropped.
   const combined = `${result.stdout.replace(/\n+$/, "")}\n${result.stderr.replace(/\n+$/, "")}`;
-  const answer = parseOutput(built.output, result.stdout);
-  const meta = parseMeta(built.output, result.stdout);
+  const outputKind = usedLive ? "text" : built.output;
+  const answer = parseOutput(outputKind, result.stdout);
+  const meta = parseMeta(outputKind, result.stdout);
   const modelRefused = modelRefusalPattern.test(output);
   const quota = !modelRefused && quotaPattern.test(output);
 

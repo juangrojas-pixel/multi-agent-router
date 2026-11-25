@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+export type LiveDialog = { match: string; keys: string[] };
+export type LiveConfig = { args: string[]; model_args?: string[]; dialogs?: LiveDialog[] };
 export type Agent = {
   enabled?: boolean; command: string; model?: string | null; timeout_seconds?: number;
   extra_args?: string[]; prompt_preamble?: string; fallback?: string[]; quota?: { group: string; min_remaining: number };
@@ -8,6 +10,7 @@ export type Agent = {
   models?: string[]; effort_levels?: string[];
   output?: "text" | "agy-json" | "opencode-events" | "claude-json";
   backend?: string;
+  live?: LiveConfig;
   // Agentic dispatcher (specs/002-agentic-dispatcher/data-model.md).
   list_models?: { cmd: string[]; parse: string; timeout_seconds?: number };
   version_cmd?: string[]; latest_cmd?: string[] | null; update_cmd?: string;
@@ -54,6 +57,10 @@ export function validateConfig(config: Config): string | null {
       }
     }
     if (agent.version_cmd !== undefined && badCommand(agent.version_cmd)) return `agents.${id}.version_cmd: must start with a non-empty command`;
+    if (agent.live !== undefined) {
+      const liveError = validateLive(id, agent.live);
+      if (liveError) return liveError;
+    }
   }
   const dispatcher = validateDispatcher(config);
   if (dispatcher) return dispatcher;
@@ -74,6 +81,29 @@ export function validateConfig(config: Config): string | null {
   if (config.orchestrator && !agents[config.orchestrator.agent]) return `orchestrator.agent: unknown agent: ${config.orchestrator.agent}`;
   for (const [index, rule] of (config.routing?.rules ?? []).entries()) {
     if (rule.role !== undefined && !config.roles?.[rule.role]) return `routing.rules[${index}].role: unknown role: ${rule.role}`;
+  }
+  return null;
+}
+
+function validateLive(id: string, live: unknown): string | null {
+  const base = `agents.${id}.live`;
+  if (!isObject(live)) return `${base}: must be an object`;
+  if (!Array.isArray(live.args) || live.args.some((item) => typeof item !== "string")) {
+    return `${base}.args: must be an array of strings`;
+  }
+  if (live.model_args !== undefined && (!Array.isArray(live.model_args) || live.model_args.some((item) => typeof item !== "string"))) {
+    return `${base}.model_args: must be an array of strings`;
+  }
+  if (live.dialogs !== undefined) {
+    if (!Array.isArray(live.dialogs)) return `${base}.dialogs: must be an array`;
+    for (const [index, dialog] of live.dialogs.entries()) {
+      const key = `${base}.dialogs[${index}]`;
+      if (!isObject(dialog)) return `${key}: must be an object`;
+      if (typeof dialog.match !== "string" || !dialog.match.trim()) return `${key}.match: must be a non-empty string`;
+      if (!Array.isArray(dialog.keys) || dialog.keys.length === 0 || dialog.keys.some((k) => typeof k !== "string" || !k.trim())) {
+        return `${key}.keys: must be a non-empty array of strings`;
+      }
+    }
   }
   return null;
 }

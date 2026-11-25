@@ -89,6 +89,22 @@ const agentCases: Array<[string, object, string]> = [
     "config: agents.plain.list_models.cmd: must start with a non-empty command"],
   ["empty version_cmd", { version_cmd: [""] },
     "config: agents.plain.version_cmd: must start with a non-empty command"],
+  ["non-object live config", { live: "yes" },
+    "config: agents.plain.live: must be an object"],
+  ["missing live.args", { live: {} },
+    "config: agents.plain.live.args: must be an array of strings"],
+  ["non-string item in live.args", { live: { args: [123] } },
+    "config: agents.plain.live.args: must be an array of strings"],
+  ["non-string item in live.model_args", { live: { args: [], model_args: [42] } },
+    "config: agents.plain.live.model_args: must be an array of strings"],
+  ["non-array live.dialogs", { live: { args: [], dialogs: "bad" } },
+    "config: agents.plain.live.dialogs: must be an array"],
+  ["empty live dialog match", { live: { args: [], dialogs: [{ match: " ", keys: ["enter"] }] } },
+    "config: agents.plain.live.dialogs[0].match: must be a non-empty string"],
+  ["empty live dialog keys", { live: { args: [], dialogs: [{ match: "Trust?", keys: [] }] } },
+    "config: agents.plain.live.dialogs[0].keys: must be a non-empty array of strings"],
+  ["blank key in live dialog keys", { live: { args: [], dialogs: [{ match: "Trust?", keys: [" "] }] } },
+    "config: agents.plain.live.dialogs[0].keys: must be a non-empty array of strings"],
 ];
 
 for (const [name, extra, message] of agentCases) {
@@ -110,7 +126,12 @@ test("valid dispatcher keys are accepted", () => {
     models: { m1: { tier: { code: "strong" } } }, model_aliases: { m1: "m-one" },
     benchmarks: { max_age_days: 7, sources: [{ id: "md", url: "file:///x", parse: "models-dev" }] },
   }) as { agents: Record<string, Record<string, unknown>> };
-  Object.assign(config.agents.plain, { list_models: { cmd: ["x", "models"], parse: "tsv" }, version_cmd: ["x", "--version"], quota_groups: { "*": "G" } });
+  Object.assign(config.agents.plain, {
+    list_models: { cmd: ["x", "models"], parse: "tsv" },
+    version_cmd: ["x", "--version"],
+    quota_groups: { "*": "G" },
+    live: { args: ["{model_args}"], model_args: ["--model", "{model}"], dialogs: [{ match: "Trust this folder?", keys: ["enter"] }] },
+  });
   const s = scratchConfig(config);
   const result = runCli(["-a", "one", "hello"], s.env);
   assert.equal(result.status, 0, result.stderr);

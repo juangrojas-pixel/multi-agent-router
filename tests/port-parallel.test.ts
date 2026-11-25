@@ -85,7 +85,7 @@ test("parallel rejects options and arguments like the bash router", () => {
   }
   // The TypeScript router also accepts --backend herdr (FR-019), so its message differs from bash on purpose.
   assert.deepEqual(runCli(["parallel", "--backend", "nope", "PING"], s.env),
-    { stdout: "", stderr: "[ask-agent] error: unknown backend: nope (use hc, herdr or subprocess)\n", status: 2 });
+    { stdout: "", stderr: "[ask-agent] error: unknown backend: nope (use hc, herdr, live or subprocess)\n", status: 2 });
   // bash also prints its own `cd` error line, which names the script path; only the router line is kept.
   const cd = runCli(["parallel", "-a", "codex", "-C", "/no/such/dir", "PING"], s.env);
   assert.deepEqual(cd, { stdout: "", stderr: "[ask-agent] error: cannot cd to /no/such/dir\n", status: 2 });

@@ -38,7 +38,7 @@ ask-agent config                         # merged config (agents.json + private 
 
 ### Roles
 
-`roles` in `agents.json` names who does what. Each role has a `description`, an ordered `agents` list and optional `model` and `effort` defaults. An entry is an agent id or `{ "agent", "model", "effort" }`; the entry's own value wins over the role default, which wins over the agent's `model`. The effort reaches the agent through its `effort_args` (for example `["--thinking", "{effort}"]`), and a role may set it only on an agent that declares `effort_levels`.
+`roles` in `agents.json` names who does what. Each role has a `description`, an ordered `agents` list and optional `model` and `effort` defaults. An entry is an agent id or `{ "agent", "model", "effort" }`; the entry's own value wins over the role default, which wins over the agent's `model`. The effort reaches the agent through its `effort_args` (for example `["--thinking", "{effort}"]`), and a role may set it only on an agent that declares `effort_levels`. A role may also set `prompt_preamble`: task instructions sent after the agent's own `prompt_preamble` (which keeps its safety rules) and before the prompt.
 
 ```json
 "roles": {

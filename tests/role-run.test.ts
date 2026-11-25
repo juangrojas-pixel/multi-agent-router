@@ -121,3 +121,21 @@ test("runs.jsonl records the role of a role run", () => {
   assert.equal(rows[0].role, "coder");
   assert.equal(rows[0].agent, "one");
 });
+
+test("a role's prompt_preamble goes after the agent's preamble and before the prompt", () => {
+  const config = roleConfig({ reports: { description: "d", agents: ["argv"], prompt_preamble: "role rules" } });
+  (config.agents.argv as Record<string, unknown>).prompt_preamble = "agent rules";
+  const setup = scratchConfig(config);
+  const result = runCli(["-r", "reports", "hello"], setup.env);
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "--model\nagent-model\nagent rules\n\nrole rules\n\nhello\n");
+});
+
+test("a role without prompt_preamble keeps only the agent's preamble", () => {
+  const config = roleConfig({ coder: { description: "d", agents: ["argv"] } });
+  (config.agents.argv as Record<string, unknown>).prompt_preamble = "agent rules";
+  const setup = scratchConfig(config);
+  const result = runCli(["-r", "coder", "hello"], setup.env);
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "--model\nagent-model\nagent rules\n\nhello\n");
+});

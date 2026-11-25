@@ -16,19 +16,56 @@
     ]
   },
   "roles": {
+    "think": {
+      "description": "Thinks through hard problems: design, root cause, second opinions.",
+      "agents": [
+        {
+          "agent": "agy",
+          "model": "gemini-4-neon-high"
+        },
+        "codex"
+      ]
+    },
+    "verify": {
+      "description": "Checks finished work independently against its spec; never fixes it.",
+      "agents": [
+        {
+          "agent": "agy",
+          "model": "gemini-4-neon-high"
+        },
+        "codex"
+      ]
+    },
     "coder": {
       "description": "Writes and edits code from a clear task.",
       "agents": [
-        "gentle-shell",
-        "agy"
+        {
+          "agent": "agy",
+          "model": "gemini-4-hydrogen-high"
+        },
+        "gentle-shell"
       ]
     },
     "docs": {
       "description": "Drafts low-stakes text: docs, summaries, changelogs.",
       "agents": [
-        "opencode",
-        "agy"
+        {
+          "agent": "agy",
+          "model": "gemini-4-hydrogen-medium"
+        },
+        "opencode"
       ]
+    },
+    "reports": {
+      "description": "Writes client reports (weekly, monthly, quarterly) by following the existing report skills.",
+      "agents": [
+        {
+          "agent": "agy",
+          "model": "gemini-4-hydrogen-high"
+        },
+        "gentle-shell"
+      ],
+      "prompt_preamble": "You write a client report. Before anything else, read and follow the skill that matches the requested cadence: /home/agente/.claude/skills/informe-semanal/SKILL.md (weekly), /home/agente/.claude/skills/informe-mensual/SKILL.md (monthly) or /home/agente/.claude/skills/informe-trimestral/SKILL.md (quarterly); for log evidence also follow /home/agente/.claude/skills/logs-eval-semanal/SKILL.md. Do not invent steps or tools the skill does not name. Mark any fact you could not confirm as \"a confirmar\". Do not verify your own report, do not generate the PDF and do not upload anything: verification is done separately with verificar-informe. Reply with the report path and the list of sources you used."
     }
   },
   "orchestrator": {
@@ -48,9 +85,9 @@
     },
     "agy": {
       "enabled": true,
-      "description": "Antigravity CLI (Gemini Pro/Flash, Claude, GPT-OSS on its own quota); executes easy, well-specified tasks",
+      "description": "Antigravity CLI on its own quota (Gemini 4 Hydrogen by default, Neon for think/verify roles); executes easy, well-specified tasks",
       "command": "agy",
-      "model": null,
+      "model": "gemini-4-hydrogen-high",
       "timeout_seconds": 1800,
       "extra_args": [],
       "quota": {

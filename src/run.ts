@@ -143,8 +143,11 @@ async function execute(
 ): Promise<{ result: RunResult; answer: string }> {
   const agent = config.agents[id];
   const model = requestedModel || agent.model || "";
+  // The role preamble adds task instructions after the agent preamble, which keeps the agent's safety rules.
   const preamble = agent.prompt_preamble ?? config.prompt_preamble ?? "";
-  const task = preamble ? `${preamble}\n\n${prompt}` : prompt;
+  const rolePreamble = (role && config.roles?.[role]?.prompt_preamble) || "";
+  const head = [preamble, rolePreamble].filter(Boolean).join("\n\n");
+  const task = head ? `${head}\n\n${prompt}` : prompt;
   const built = buildAgent(id, agent);
   const timeoutSeconds = agent.timeout_seconds ?? 600;
   const started = Date.now();

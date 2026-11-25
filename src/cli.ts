@@ -172,7 +172,7 @@ for (let index = 0; index < args.length; index += 1) {
       "  ask-agent parallel [-t TIER | -a A,B] [-C DIR] [PROMPT]       every ready agent answers",
       "  ask-agent status                                              readiness, tiers, agy quota",
       "  ask-agent catalog [-a AGENT] [--refresh] [--json]             usable models per agent, with status and quota",
-      "  ask-agent preflight [--json]                                  versions, quotas, models, data freshness (reports only)",
+      "  ask-agent preflight [--json] [--update]                       versions, quotas, models, data freshness; --update runs update_cmd for outdated agents, then re-checks",
       "  ask-agent candidates --kind K --tier T [--size s|m|l] [--client] [-n N] [--json]  agent/model pairs, cheapest capable first",
       "  ask-agent dispatch [-f FILE | -] [--json]                     run a batch of distinct tasks in parallel, one receipt each",
       "  ask-agent reset [AGENT]                                       clear cooldowns",

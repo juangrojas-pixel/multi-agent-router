@@ -25,7 +25,7 @@ function setup(t: TestContext, config: object) {
   const original = snapshot();
   function snapshot() {
     return Object.fromEntries(readdirSync(root, { recursive: true, withFileTypes: true })
-      .filter((item) => item.parentPath !== dir && item.name !== "calls")
+      .filter((item) => item.parentPath !== dir && !item.name.startsWith("calls"))
       .map((item) => {
         const path = join(item.parentPath, item.name);
         return [path, item.isDirectory() ? "directory" : readFileSync(path, "utf8")];
@@ -107,7 +107,7 @@ for (const [status, days, exit] of [["fresh", 1, 0], ["stale", 8, 3], ["missing"
 test("preflight rejects extra arguments without running checks", (t) => {
   const s = setup(t, { agents: { one: agent } });
   assert.deepEqual(runCli(["preflight", "--bad"], s.env), { status: 2, stdout: "",
-    stderr: "[ask-agent] error: usage: ask-agent preflight [--json]\n" });
+    stderr: "[ask-agent] error: usage: ask-agent preflight [--json] [--update]\n" });
   s.checkState([], null);
 });
 
@@ -122,4 +122,41 @@ test("preflight checks five agents concurrently and finishes under 60 seconds", 
   assert.deepEqual(result, { status: 0, stderr: "", stdout: ids.map((id) =>
     `${id}  version 1.9.0 (latest 1.9.0, current)\n${lines}`).join("") + "benchmarks: not configured\npreflight: ready\n" });
   s.checkState(ids.flatMap(() => calls), Object.fromEntries(ids.map((id) => [id, { ...listed, models: listed.models.slice(0, 2) }])));
+});
+
+// --update runs update_cmd only for outdated agents, sends their output to stderr, then re-checks.
+const noLatest = { ...agent, latest_cmd: null };
+for (const fail of [false, true]) {
+  test(`preflight --update ${fail ? "reports a failed update and stays outdated" : "updates outdated agents and re-checks"}`, (t) => {
+    const s = setup(t, { agents: { one: agent, two: noLatest } });
+    const result = runCli(["preflight", "--update"], { ...s.env, STUB_LATEST: "1.10.0", STUB_UPDATE_FAIL: fail ? "1" : "0" });
+    const version = fail ? "1.9.0 (latest 1.10.0, outdated)" : "1.10.0 (latest 1.10.0, current)";
+    assert.deepEqual(result, {
+      status: fail ? 3 : 0,
+      stderr: `[ask-agent] updating one: ${update}\n` +
+        (fail ? "update failed: registry down\n[ask-agent] update of one failed (exit 4)\n" : "installed 1.10.0\n[ask-agent] updated one\n"),
+      stdout: `one  version ${version}\n${modelsLine}` + (fail ? `  update: ${update}\n` : "") +
+        `two  version ${fail ? "1.9.0" : "1.10.0"} (latest unknown, unknown)\n${modelsLine}` +
+        `benchmarks: not configured\npreflight: ${fail ? "outdated" : "ready"}\n`,
+    });
+    s.checkState(["version", "latest", "version", "update", "version", "latest", "version", "models", "models"],
+      { one: listed, two: { ...listed, models: [listed.models[0], listed.models[1], { ...listed.models[2], reason: "not listed by two" }] } });
+  });
+}
+
+test("preflight --update --json lists each update with its exit status", (t) => {
+  const s = setup(t, { agents: { one: agent } });
+  const result = runCli(["preflight", "--json", "--update"], { ...s.env, STUB_LATEST: "1.10.0" });
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr, `[ask-agent] updating one: ${update}\ninstalled 1.10.0\n[ask-agent] updated one\n`);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.updates, { one: { command: update, exit: 0 } });
+  assert.equal(report.agents.one.version.status, "current");
+});
+
+test("preflight --update with everything current runs no update", (t) => {
+  const s = setup(t, { agents: { one: agent } });
+  assert.deepEqual(runCli(["preflight", "--update"], s.env), { status: 0, stderr: "",
+    stdout: `one  version 1.9.0 (latest 1.9.0, current)\n${modelsLine}benchmarks: not configured\npreflight: ready\n` });
+  s.checkState(["version", "latest", ...calls], { one: listed });
 });

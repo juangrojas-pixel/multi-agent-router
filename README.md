@@ -161,6 +161,8 @@ Role tasks fall back along their role order; agent tasks run only the named agen
 
 `ask-agent preflight [--json]` checks the installed and latest CLI versions for enabled agents, refreshes the model catalog, and reports model counts by status, the lowest known quota per agent, and benchmark cache freshness. Missing or failed version lookups show `unknown`; benchmark freshness is checked locally, with no benchmark download. Without benchmark configuration, it shows `not configured`.
 
+`ask-agent preflight --update` also updates: it runs `update_cmd` for each outdated agent, one at a time, prints that command's output on stderr, and then reports again. Agents that are current or whose latest version is `unknown` are not touched. Run it on request, not on every start: an update can change an agent while it is working.
+
 Preflight reports configured update commands for outdated agents but never runs them. Exit codes: `0` ready, `3` outdated agent or missing/stale benchmark data, `1` failed check, `2` invalid configuration or usage.
 
 ### Choosing the model per task

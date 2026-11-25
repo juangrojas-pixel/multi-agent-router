@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { buildCatalog } from "./catalog.ts";
 import type { Agent, Config } from "./config.ts";
@@ -43,12 +43,43 @@ function benchmarkStatus(config: Config["benchmarks"]) {
   return timestamps.some((time) => time < cutoff) ? "stale" : "fresh";
 }
 
+// Runs one update command through the shell. Its output goes to stderr so --json stdout stays parseable.
+function runUpdate(command: string): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn("sh", ["-c", command], { stdio: ["ignore", 2, 2], timeout: 600_000, killSignal: "SIGKILL" });
+    child.on("error", () => resolve(127));
+    child.on("close", (code) => resolve(code ?? 1));
+  });
+}
+
+// Updates outdated agents one at a time: package managers share global state and must not race.
+async function updateOutdated(enabled: Array<[string, Agent]>) {
+  const versions = await Promise.all(enabled.map(([, agent]) => versionReport(agent)));
+  const updates: Record<string, { command: string; exit: number }> = {};
+  for (const [i, [id]] of enabled.entries()) {
+    const { status, update_cmd } = versions[i];
+    if (status !== "outdated") continue;
+    if (!update_cmd) {
+      process.stderr.write(`[ask-agent] ${id} is outdated but has no update_cmd\n`);
+      continue;
+    }
+    process.stderr.write(`[ask-agent] updating ${id}: ${update_cmd}\n`);
+    const exit = await runUpdate(update_cmd);
+    process.stderr.write(exit === 0 ? `[ask-agent] updated ${id}\n` : `[ask-agent] update of ${id} failed (exit ${exit})\n`);
+    updates[id] = { command: update_cmd, exit };
+  }
+  return updates;
+}
+
 export async function preflightCommand(config: Config, args: string[]): Promise<number> {
-  if (args.length > 1 || (args.length === 1 && args[0] !== "--json")) {
-    process.stderr.write("[ask-agent] error: usage: ask-agent preflight [--json]\n");
+  const json = args.includes("--json");
+  const update = args.includes("--update");
+  if (args.length !== Number(json) + Number(update)) {
+    process.stderr.write("[ask-agent] error: usage: ask-agent preflight [--json] [--update]\n");
     return 2;
   }
   const enabled = Object.entries(config.agents).filter(([, agent]) => agent.enabled === true);
+  const updates = update ? await updateOutdated(enabled) : null;
   const [catalog, versions] = await Promise.all([
     buildCatalog(config, { refresh: true, concurrent: true }).catch((error: unknown) => {
       process.stderr.write(`[ask-agent] error: could not refresh catalog: ${String(error)}\n`);
@@ -68,8 +99,9 @@ export async function preflightCommand(config: Config, args: string[]): Promise<
   const benchmarks = benchmarkStatus(config.benchmarks);
   const failed = !catalog || !Object.values(catalog.agents).some((agent) => agent.source === "cli" || agent.models.length);
   const outdated = benchmarks === "stale" || benchmarks === "missing" || versions.some(({ status }) => status === "outdated");
-  if (args[0] === "--json") {
-    process.stdout.write(`${JSON.stringify({ agents: Object.fromEntries(entries), benchmarks }, null, 2)}\n`);
+  if (json) {
+    const report = { agents: Object.fromEntries(entries), benchmarks, ...(updates ? { updates } : {}) };
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
     const lines: string[] = [];
     for (const [id, { version, quota, models }] of entries) {

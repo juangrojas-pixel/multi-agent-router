@@ -4,10 +4,14 @@ printf '%s\n' "$*" >> "$STUB_MARKER"
 case "$1" in
   version|latest)
     if [[ ${STUB_DELAY:-0} != 0 ]]; then sleep "$STUB_DELAY"; fi
-    if [[ $1 == version ]]; then printf '%s\n' "$STUB_INSTALLED";
+    if [[ $1 == version ]]; then
+      if [[ -f ${STUB_MARKER}.installed ]]; then cat "${STUB_MARKER}.installed"; else printf '%s\n' "$STUB_INSTALLED"; fi
     else [[ ${STUB_OFFLINE:-0} == 0 ]] && printf '%s\n' "$STUB_LATEST"; fi ;;
   models) printf '%s\n' 'model-1' 'model-2' ;;
   -p) printf '%s\n' '{"command":{"data":{"groups":[{"name":"family","buckets":[{"remaining_fraction":0.75},{"remaining_fraction":0.25}]}]}}}' ;;
-  update) touch "${STUB_MARKER}.updated" ;;
+  update)
+    if [[ ${STUB_UPDATE_FAIL:-0} != 0 ]]; then printf '%s\n' 'update failed: registry down' >&2; exit 4; fi
+    printf '%s\n' "$STUB_LATEST" > "${STUB_MARKER}.installed"
+    printf '%s\n' "installed $STUB_LATEST" ;;
   *) exit 1 ;;
 esac

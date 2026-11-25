@@ -114,6 +114,11 @@ assert output, exit code and persisted state.
 - [ ] T030 [US7] Failing tests in `tests/herdr-backend.test.ts` with a stub `herdr` (records calls, serves JSON): split `--current --direction right --cwd <cwd> --no-focus`, `pane rename`, `report-agent --state working`, `pane run`, result parity with subprocess (stdout, stderr, exit), pane closed after success and kept after failure, timeout sends ctrl+c and returns 142, fallback to subprocess when `HERDR_ENV` is unset or the split fails
 - [ ] T031 [US7] Implement `src/herdr.ts` (`herdrRun`) mirroring `src/hc.ts`; select it in `backendFor` in `src/run.ts`; accept `--backend herdr` in `src/cli.ts`; README section
 
+## Phase 8c: US8 - Watch and steer each agent live (P2)
+
+- [ ] T032 [US8] Failing tests in `tests/live-backend.test.ts` with a stub hc playing an interactive agent: absolute-path start under the caller, configured dialog answered, unknown blocked dialog stops with exit 2 and keeps the terminal, task sent on idle, answer from the answer file, timeout, fallback to hc for agents without `live`
+- [ ] T033 [US8] Implement `src/live.ts`; select it in `backendFor`; `--backend live`; `live` config per agent (args, model_args, dialogs) validated in `src/config.ts`; agents.json for agy, codex, gentle-shell, claude; README
+
 ## Phase 9: Polish & cross-cutting
 
 - [ ] T026 Update `src/guidance.ts`: flow preflight -> catalog -> candidates -> dispatch, record `--task`/`--reason`, client-environment restriction kept; failing test first in `tests/guidance.test.ts`

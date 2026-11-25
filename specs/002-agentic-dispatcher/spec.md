@@ -189,6 +189,35 @@ done, and returns the same stdout and exit code as the subprocess backend.
 3. **Given** the router is not inside Herdr or Herdr refuses the split, **When** a task runs,
    **Then** it falls back to the subprocess backend and logs why.
 
+### User Story 8 - Watch and steer each agent live in the Herdr app (Priority: P2)
+
+With the live backend, a delegated agent runs in its own interactive TUI inside an hc terminal
+under the orchestrator, so the Herdr app shows it with its icon and live status (working, done,
+blocked) and the user can open it, watch every step and even type to it. User words: "el modelo
+interactivo me gustaria para ver que esta haciendo cada agente por que esa es como el razon ser".
+
+**Why this priority**: seeing each agent work is the reason the user wants the swarm in Herdr.
+
+**Independent Test**: with a stub hc that plays an interactive agent (statuses blocked/idle/done,
+writes the answer file when the task arrives), a live run starts the TUI by absolute path,
+answers only the configured startup dialogs, sends the task, waits for done and returns the
+answer from the answer file with exit 0.
+
+**Acceptance Scenarios**:
+
+1. **Given** backend `live` and an agent with a `live` config, **When** a task runs, **Then** the
+   agent's TUI starts by absolute path in an hc terminal under the caller, with the requested
+   model, and the task is sent once the agent reports idle.
+2. **Given** the agent stops at a startup dialog listed in its config (for example "Trust this
+   folder?" for the task's own directory), **Then** the router answers it with the configured
+   keys; **Given** any other blocked state, **Then** the run stops with exit 2 naming the dialog,
+   and the terminal stays open for the user.
+3. **Given** the agent reports done, **Then** the answer is the content of the answer file the
+   task asked for, the run records the requested model (`model_source: requested`), and the
+   terminal stays open for the user to read or continue.
+4. **Given** an agent without a `live` config (opencode today: its TUI has no model flag), **When**
+   backend `live` is selected, **Then** that agent runs with the hc backend instead and says so.
+
 ### Edge Cases
 
 - An agent's quota runs out mid-swarm: that task falls back by config; the others continue.
@@ -247,6 +276,11 @@ done, and returns the same stdout and exit code as the subprocess backend.
   (no focus change), label it, report the agent state to Herdr (working, then idle or released),
   and return the same result as the subprocess backend; outside Herdr it MUST fall back to the
   subprocess backend and say so.
+- **FR-020**: With backend `live`, an agent that declares a `live` config MUST run as an
+  interactive TUI in an hc terminal under the caller: started by absolute path, startup dialogs
+  answered only when they match the agent's configured list, task sent when idle, answer read
+  from the answer file the task names; any other blocked state stops the run (exit 2) and leaves
+  the terminal open; agents without `live` fall back to the hc backend.
 - **FR-018**: A batch task marked as client work MUST run only on agents the private policy
   allows for client work; a batch naming any other agent for such a task MUST be rejected
   before any agent starts, and candidates for client work MUST list only allowed agents.

@@ -32,6 +32,7 @@ Task IDs are those of `specs/002-agentic-dispatcher/tasks.md`.
 - [x] P8c hc terminals under the orchestrator + auto hc backend + terminal banner, inline. Commits `c7d1481`, `6b71100`.
 - [x] P10 US8 live interactive backend. Route: agy `gemini-4-neon-high` after a parent spike. Commit `41d9655`; placeholder and guidance fixes `e93c41d`.
 - [x] P9 guidance + delegate skill, inline. Commit `a07164f`.
+- [ ] P11 Follow-up from the four RDD reviews (non-blocking WARNING findings listed in L19). Not started.
 
 ## Log
 
@@ -71,3 +72,49 @@ Task IDs are those of `specs/002-agentic-dispatcher/tasks.md`.
 - L16 (2026-11-25) P6 receipt from gentle-shell again ended with suites "running" (second time: it backgrounds suites and ends its turn); parent seam check 150/150, 35, 51. First real refresh: lmarena failed (shared 15 s timeout across 21 HF pages plus other sources); fixed with one timeout per request, real refresh fresh in 24.1 s. Real data: LMArena ranks GPT-6.2 Sol 109 in coding (preference-based), so it measures `light`; Sonnet 5.5 rank 28 -> standard; Neon/Carbon/Opus frontier. Open question for the user: declared tiers for GPT (config `models.<id>.tier`) or an agentic-coding source (Epoch SWE-bench) before P7 routes on these tiers.
 - L17 (2026-11-25) User decisions: "las dos, primero declara tiers y despues suma Epoch" (declared gpt-6.2-sol `1e78582`, Epoch FrontierSWE `7888f63`); "dale, agrupa los esfuerzos y sigue" (`57c61d5`); opencode first for docs (`93a103e`); "quiero poder tambien ver al lado izquierdo cuando claude manda otro agente" and "el modelo interactivo me gustaria para ver que esta haciendo cada agente por que esa es como el razon ser" -> live backend as an option ("pero como opcional").
 - L18 (2026-11-25) Findings: the Herdr app is a herdr-core client (HC_TERMINAL_ID), so hc terminals parented to the orchestrator show under it; Herdr detects agent icon/status only for interactive TUIs; hc core PATH lacks ~/.npm-global/bin (live resolves absolute paths); router substituted {model} inside prompts (fixed `e93c41d`). Live real run: agy flash low answered in 19 s, terminal stays open with status done. Quota: the 5 h Gemini window moved -0.47% for the -p run and regenerated (+0.41%) during the live run; one small task costs less than the regeneration noise, so the live overhead could not be measured and is expected to be the appended instruction plus one file write.
+- L19 (2026-11-25) User: "hazlos por partes". The 3e11b64..57c4bbd review exceeded the reviewer context budget, so it ran as four slices in temporary worktrees (granted each time). Slice 1 (3e11b64..1e78582) approved, lineage review-e680a6ea204b8b20; slice 2 (..7888f63) approved, review-acca0f6e51ef1053; slice 4 (..57c4bbd) approved, review-359fb1ee63ccbfe2; slice 3 (..64ad4e2) correction_required: refuter corroborated CRITICAL R1-client-policy-fallback-bypass (a client task with fallback: true validated only the named agent). One bounded correction (forecast 25 lines, actual 25; RED, GREEN), targeted validation approved, review-613231c36b1535f7; fix cherry-picked as `ff71a80`. Several reviewer and refuter captures first failed on the Claude 5-hour limit and were relaunched only for the slots STATUS reoffered. Suites after the fix: 206 node, 35 parity, 51 route-hint. Non-blocking warnings kept for P11:
+  - [s1] R1-unbounded-hf-pagination | risk | WARNING | src/benchmarks.ts:136-150
+  - [s1] R2-arraymodels-implicit-parser | readability | WARNING | src/benchmarks.ts:102-108
+  - [s1] R2-cached-catalog-spawns-cli | readability | WARNING | src/catalog.ts:202-208
+  - [s1] R2-p5b-status-stale | readability | WARNING | odd/tasks/agentic-dispatcher.md:27
+  - [s1] R2-preflight-timeout-cap-removed | readability | WARNING | src/catalog.ts:98
+  - [s1] R3-hf-pagination-untested | reliability | WARNING | src/benchmarks.ts:135-151
+  - [s1] R3-refresh-on-miss-failure-path | reliability | WARNING | src/cli.ts:222-225
+  - [s1] R4-empty-arena-marked-fresh | resilience | WARNING | src/benchmarks.ts:80-96
+  - [s1] R4-implicit-refresh-degrades-cache | resilience | WARNING | src/cli.ts:220-226
+  - [s1] R4-preflight-list-timeout-uncapped | resilience | WARNING | src/catalog.ts:98
+  - [s1] R4-serial-benchmark-then-catalog-refresh | resilience | WARNING | src/catalog.ts:173-175
+  - [s2] R2-epoch-id-suffix-regex | readability | WARNING | src/benchmarks.ts:195
+  - [s2] R2-merge-policy-condition | readability | WARNING | src/benchmarks.ts:300-304
+  - [s2] R2-zip-basename-collapse | readability | WARNING | src/benchmarks.ts:135-136
+  - [s2] R2-zip-magic-offsets | readability | WARNING | src/benchmarks.ts:116-158
+  - [s2] R3-epoch-missing-bands | reliability | WARNING | src/benchmarks.ts:204
+  - [s2] R3-epoch-score-scale | reliability | WARNING | src/benchmarks.ts:198
+  - [s2] R3-merge-first-wins | reliability | WARNING | src/benchmarks.ts:300-306
+  - [s2] R3-refusal-masks-quota | reliability | WARNING | src/run.ts:193-194
+  - [s2] R4-model-refusal-masks-quota | resilience | WARNING | src/run.ts:193-194
+  - [s3] R2-docs-role-reorder-unexplained | readability | WARNING | agents.json:138
+  - [s3] R2-herdr-split-cwd-tautology | readability | WARNING | tests/herdr-backend.test.ts:36
+  - [s3] R2-stale-task-tracking | readability | WARNING | specs/002-agentic-dispatcher/tasks.md:113-114
+  - [s3] R3-dispatch-child-execargv | reliability | WARNING | src/dispatch.ts:216
+  - [s3] R3-dispatch-concurrency-nan | reliability | WARNING | src/dispatch.ts:279
+  - [s3] R3-dispatch-depth-guard-cleared | reliability | WARNING | src/dispatch.ts:210
+  - [s3] R3-dispatch-receipt-agent-misattributed | reliability | WARNING | src/dispatch.ts:296
+  - [s3] R3-herdr-pane-run-unchecked | reliability | WARNING | src/herdr.ts:91
+  - [s3] R3-herdr-timeout-leaves-agent-running | reliability | WARNING | src/herdr.ts:96-100
+  - [s3] R4-herdr-control-calls-unbounded | resilience | WARNING | src/herdr.ts:22-33
+  - [s3] R4-herdr-pane-run-failure-ignored | resilience | WARNING | src/herdr.ts:91-103
+  - [s3] R4-herdr-timeout-no-kill-escalation | resilience | WARNING | src/herdr.ts:96-100
+  - [s4] R1-001 | risk | WARNING | src/live.ts:125-131
+  - [s4] R1-002 | risk | WARNING | agents.json:390-396
+  - [s4] R2-live-args-duplicates-commandArgs | readability | WARNING | src/live.ts:45-59
+  - [s4] R2-live-capture-address-duplicated | readability | WARNING | src/live.ts:10-26
+  - [s4] R2-tasks-left-unchecked | readability | WARNING | specs/002-agentic-dispatcher/tasks.md:119-120
+  - [s4] R3-live-effort-dropped | reliability | WARNING | agents.json:190-193
+  - [s4] R3-live-empty-answer-success | reliability | WARNING | src/live.ts:233-241
+  - [s4] R3-live-get-failure-aborts | reliability | WARNING | src/live.ts:71-84
+  - [s4] R3-live-idle-after-send-race | reliability | WARNING | src/live.ts:231-241
+  - [s4] R3-terminal-name-truncation-collision | reliability | WARNING | src/hc.ts:62-66
+  - [s4] R4-live-blocked-orphan-task | resilience | WARNING | src/live.ts:199-210
+  - [s4] R4-live-hc-transient | resilience | WARNING | src/live.ts:182-197
+  - [s4] R4-live-idle-false-success | resilience | WARNING | src/live.ts:231-238

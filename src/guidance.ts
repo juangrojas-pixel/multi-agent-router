@@ -16,10 +16,10 @@ export function guidance(config: Config): string {
     ].join("\n"));
   }
   // The per-task choice (specs/002-agentic-dispatcher): shown only when the capability vocabulary
-  // is configured, so a router without it keeps its role-only guidance.
+  // is configured next to roles, so a router without them keeps its previous guidance.
   const tiers = config.capability_tiers ?? [];
   const kinds = config.kinds ?? [];
-  if (tiers.length > 0 && kinds.length > 0) {
+  if (roles.length > 0 && tiers.length > 0 && kinds.length > 0) {
     const sizes = Object.keys(config.sizes ?? { s: 0, m: 0, l: 0 });
     parts.push([
       "Choose agent and model per task with evidence (roles stay the default):",

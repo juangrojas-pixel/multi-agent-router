@@ -236,3 +236,10 @@ test("a model that needs usage credits fails that run without cooling the whole 
   assert.doesNotMatch(result.stderr, /cooled down/);
   assert.equal(existsSync(join(s.root, "cache", "multi-agent-router", "cooldown.json")), false);
 });
+
+test("placeholders written inside the prompt reach the agent literally", () => {
+  const s = scratchConfig(argvConfig());
+  const result = runCli(["-a", "argv", "-m", "m-small", "use {model}, {prompt} and {timeout} as written"], s.env);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "--model\nm-small\nuse {model}, {prompt} and {timeout} as written\n");
+});

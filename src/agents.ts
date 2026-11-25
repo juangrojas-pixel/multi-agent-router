@@ -29,7 +29,8 @@ export function commandArgs(id: string, agent: Agent, prompt: string, model: str
   const out: string[] = [];
   for (const part of built.args) {
     if (part in fragments) out.push(...fragments[part]);
-    else out.push(part.replaceAll("{prompt}", prompt).replaceAll("{timeout}", timeout).replaceAll("{model}", model));
+    // The prompt goes in last, so placeholders written inside it reach the agent literally.
+    else out.push(part.replaceAll("{timeout}", timeout).replaceAll("{model}", model).replaceAll("{prompt}", prompt));
   }
   return out;
 }

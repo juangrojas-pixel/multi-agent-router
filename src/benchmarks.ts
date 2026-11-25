@@ -21,6 +21,7 @@ export type BenchmarkProfile = {
 type Snapshot = { status: SourceStatus; models?: Models; parse: string };
 const cacheName = "benchmarks.json";
 const maxArenaPages = 100;
+const arenaParallelPages = 3;
 // Keep independent contributions so a stale source can be recombined with fresh ones,
 // including values hidden by precedence in the public cache.
 const snapshotsName = "benchmark-sources.json";
@@ -259,12 +260,21 @@ async function fetchModels(source: Source, config: Config, date: string): Promis
     const total = payload.num_rows_total;
     // Reject oversized snapshots before issuing follow-ups; partial rankings are not fresh data.
     if (length > 0 && Math.ceil((total - start) / length) > maxArenaPages) throw new Error("LMArena page limit exceeded");
-    for (let offset = start + length; length > 0 && offset < total; offset += length * 6) {
-      const pages = await Promise.all(Array.from({ length: Math.min(6, Math.ceil((total - offset) / length)) }, (_, i) => {
+    // The filter endpoint slows down under parallel load (responses seen taking over 13 s with six
+    // at once), so pages go three at a time and a failed page is retried once after a second (it also
+    // answers 429 when pressed).
+    const readPage = async (page: URL) => {
+      try { return await readSource(page, signal()); } catch {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        return readSource(page, signal());
+      }
+    };
+    for (let offset = start + length; length > 0 && offset < total; offset += length * arenaParallelPages) {
+      const pages = await Promise.all(Array.from({ length: Math.min(arenaParallelPages, Math.ceil((total - offset) / length)) }, (_, i) => {
         const page = new URL(url);
         page.searchParams.set("offset", String(offset + i * length));
         page.searchParams.set("length", String(length));
-        return readSource(page, signal());
+        return readPage(page);
       }));
       for (const page of pages) {
         if (!Array.isArray(page?.rows)) throw new Error("invalid LMArena page");
@@ -302,7 +312,8 @@ export async function refreshBenchmarks(config: Config): Promise<BenchmarkCache>
       // Do not expose configured URLs, local paths, or API keys in cache diagnostics.
       const code = (cause as NodeJS.ErrnoException)?.code;
       const message = cause instanceof Error ? cause.message : "";
-      const error = code && /^[A-Z_]+$/.test(code) ? code : /^HTTP \d{3}$/.test(message) ? message : "benchmark fetch or parse failed";
+      const error = (cause as Error)?.name === "TimeoutError" ? "timeout"
+        : code && /^[A-Z_]+$/.test(code) ? code : /^HTTP \d{3}$/.test(message) ? message : "benchmark fetch or parse failed";
       return [id, { parse, ...(stale ? { models: prior.models } : {}),
         status: { fetched_at: stale ? prior.status.fetched_at : null, status: stale ? "stale" : "failed", error } }];
     }

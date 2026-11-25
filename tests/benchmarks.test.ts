@@ -101,12 +101,13 @@ test("an empty Arena refresh keeps the last usable scores and date", (t) => {
   assert.deepEqual(JSON.parse(s.run("--json")).agents.one.models, before);
 });
 
-function setupPagination(t: TestContext, total: number) {
+function setupPagination(t: TestContext, total: number, env: NodeJS.ProcessEnv = {}) {
   const s = setup(t);
   const requests = join(dirname(s.arena), "requests.txt");
   s.useArena(`https://datasets-server.huggingface.co/filter?offset=2&length=1&where=coding&total=${total}`, {
     NODE_OPTIONS: `--import=${new URL("./fixtures/p11a-hf-pagination.mjs", import.meta.url).href}`,
     P11A_HF_REQUESTS: requests,
+    ...env,
   });
   return { ...s, requests: () => readFileSync(requests, "utf8") };
 }
@@ -118,6 +119,16 @@ test("catalog follows Hugging Face pages and includes the best score from the la
     code: { rank: 2, rating: 1500, source: "arena", date: "2026-11-22" },
   });
   assert.equal(s.requests(), Array.from({ length: 8 }, (_, i) => `/filter ${i + 2} 1\n`).join(""));
+  assert.match(s.run(), /arena \S+ fresh/);
+});
+
+test("catalog retries a Hugging Face page that fails once and keeps Arena fresh", (t) => {
+  const s = setupPagination(t, 10, { P11A_HF_FAIL_ONCE: "9" });
+  const output = JSON.parse(s.run("--refresh", "--json"));
+  assert.deepEqual(output.agents.one.models[1].profile.scores, {
+    code: { rank: 2, rating: 1500, source: "arena", date: "2026-11-22" },
+  });
+  assert.equal(s.requests().split("\n").filter((line) => line === "/filter 9 1").length, 2);
   assert.match(s.run(), /arena \S+ fresh/);
 });
 

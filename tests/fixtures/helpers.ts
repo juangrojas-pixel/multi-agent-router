@@ -19,7 +19,8 @@ export function scratchConfig(config: object): { root: string; config: string; e
   mkdirSync(configHome);
   const configPath = join(dir, "agents.json");
   writeFileSync(configPath, JSON.stringify(config));
-  const { ASK_AGENT_DEPTH: _depth, ...cleanEnv } = process.env;
+  // Tests never inherit the caller's hc terminal, so the auto backend stays on subprocess.
+  const { ASK_AGENT_DEPTH: _depth, HC_TERMINAL_SOCKET: _sock, HC_TERMINAL_ID: _id, HC_SCOPE: _scope, ...cleanEnv } = process.env;
   return {
     root: dir,
     config: configPath,

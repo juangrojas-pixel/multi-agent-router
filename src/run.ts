@@ -102,11 +102,13 @@ export function modelProblem(id: string, config: Config, model: string): string 
   return null;
 }
 
-// Backend precedence: the --backend flag, then agents.<id>.backend, then backend, then subprocess.
+// Backend precedence: the --backend flag, then agents.<id>.backend, then backend, then auto.
 let backendFlag = "";
 export function setBackendFlag(value: string): void { backendFlag = value; }
+// With no setting, a router running inside an hc terminal (the Herdr app) uses hc, so every
+// agent shows in the app under its orchestrator; anywhere else it uses a subprocess.
 function backendFor(id: string, config: Config): string {
-  return backendFlag || (config.agents[id]?.backend ?? config.backend ?? "subprocess");
+  return backendFlag || (config.agents[id]?.backend ?? config.backend ?? (process.env.HC_TERMINAL_SOCKET ? "hc" : "subprocess"));
 }
 
 function runProcess(command: string, args: string[], timeoutSeconds: number): Promise<ProcessResult> {
@@ -185,7 +187,7 @@ async function execute(
   const backend = backendFor(id, config);
   const herdr = (config as Config & { herdr_command?: string }).herdr_command || "herdr";
   const result = backend === "hc"
-    ? await hcRun(hc, id, agent.command, args, timeoutSeconds, subprocess)
+    ? await hcRun(hc, id, agent.command, args, timeoutSeconds, subprocess, runContext.task || model)
     : backend === "herdr"
       ? await herdrRun({ herdr, agentId: id, model, task: runContext.task, command: agent.command, args, timeoutSeconds }, subprocess)
       : await subprocess();

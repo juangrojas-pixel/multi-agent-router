@@ -182,12 +182,12 @@ It needs the orchestrator itself inside a Herdr pane (`HERDR_ENV=1`): from anoth
 
 ### hc backend (herdr-core)
 
-`--backend hc` runs each agent inside a live [hc](https://herdr.dev) terminal instead of a plain subprocess. While it works, `hc attach aa-<agent>-<pid>` (printed on stderr) shows the agent live; `ctrl+\` detaches. The answer, stderr, exit code, quota detection and per-agent timeout behave exactly like the subprocess backend, and the terminal is removed when the run ends.
+`--backend hc` runs each agent inside a live [hc](https://herdr.dev) terminal instead of a plain subprocess. When no backend is set, a router that itself runs inside an hc terminal (the Herdr app, `HC_TERMINAL_SOCKET` set) uses hc automatically, so every delegated agent shows in the app's Agents list under the orchestrator that sent it; elsewhere the default stays a subprocess. Terminals are named `<agent>-<task or model>-<pid>` (for example `agy-p7-41233`). While it works, `hc attach <name>` (printed on stderr) shows the agent live; `ctrl+\` detaches. The answer, stderr, exit code, quota detection and per-agent timeout behave exactly like the subprocess backend, and the terminal is removed when the run ends.
 
 - Selection: `--backend hc|subprocess` flag, then `agents.<name>.backend`, then the global `backend` in `agents.json`, then `subprocess`. It applies to `-a`, `-t`, `-r` and `parallel` runs alike.
 - `hc_command` in `agents.json` sets the hc binary (default `hc`).
 - When hc cannot start the terminal, the run falls back to the subprocess backend and logs `falling back to subprocess`.
-- Terminals start with `--no-parent --no-notify`, so hc never types notes into the caller's terminal.
+- Terminals start with `--no-notify` and keep the caller's terminal as parent: they hang under the orchestrator in the Herdr app, and hc never types notes into the caller's terminal.
 
 ## Install (local)
 

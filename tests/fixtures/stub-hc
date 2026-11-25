@@ -4,6 +4,7 @@
 # STUB_HC_FAIL=TEXT makes `run` fail with TEXT on stderr and no address.
 state="${STUB_HC_STATE:?STUB_HC_STATE is required}"
 printf '%s\n' "$1" >>"${STUB_HC_LOG:-/dev/null}"
+[[ "$1" == run && -n "${STUB_HC_ARGS:-}" ]] && printf '%s\n' "$@" >"$STUB_HC_ARGS"
 case "$1" in
   run)
     if [[ -n "${STUB_HC_FAIL:-}" ]]; then echo "$STUB_HC_FAIL" >&2; exit 1; fi

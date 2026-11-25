@@ -28,8 +28,8 @@ function hcCalls(log: string): string[] {
   return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [];
 }
 
-function attachLine(agentId: string): RegExp {
-  return new RegExp(`^\\[ask-agent\\] running in hc terminal t1: hc attach aa-${agentId}-\\d+\\n`, "m");
+function attachLine(agentId: string, label = ""): RegExp {
+  return new RegExp(`^\\[ask-agent\\] running in hc terminal t1: hc attach ${agentId}-${label ? `${label}-` : ""}\\d+\\n`, "m");
 }
 
 test("--backend hc runs the agent in an hc terminal and returns its answer", () => {
@@ -127,4 +127,29 @@ test("--backend rejects other values like the bash router", () => {
     { stdout: "", stderr: "[ask-agent] error: unknown backend: nope (use hc, herdr or subprocess)\n", status: 2 });
   assert.deepEqual(runCli(["--backend"], s.env),
     { stdout: "", stderr: "[ask-agent] error: unknown backend:  (use hc, herdr or subprocess)\n", status: 2 });
+});
+
+test("an hc terminal hangs under the caller's terminal, is named after the agent and task, and never types notes", () => {
+  const s = setup();
+  const args = join(s.root, "hc-args");
+  const result = runCli(["--backend", "hc", "-a", "one", "--task", "P7 Candidates!", "PING"], { ...s.env, STUB_HC_ARGS: args });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, attachLine("one", "p7-candidates"));
+  const argv = readFileSync(args, "utf8").split("\n");
+  assert.ok(!argv.includes("--no-parent"), "keeps the caller as parent so the app shows it under the orchestrator");
+  assert.ok(argv.includes("--no-notify"));
+  const name = argv[argv.indexOf("--name") + 1];
+  assert.match(name, /^one-p7-candidates-\d+$/);
+  assert.ok(name.length <= 32);
+});
+
+test("without a backend setting, a router inside an hc terminal uses hc; elsewhere a subprocess", () => {
+  const s = setup();
+  const inside = runCli(["-a", "one", "PING"], { ...s.env, HC_TERMINAL_SOCKET: "/run/user/x/herdr-core/default.sock", HC_TERMINAL_ID: "t2p" });
+  assert.equal(inside.status, 0, inside.stderr);
+  assert.match(inside.stderr, attachLine("one"));
+  const outside = runCli(["-a", "one", "PING"], s.env);
+  assert.equal(outside.status, 0, outside.stderr);
+  assert.doesNotMatch(outside.stderr, /hc terminal/);
+  assert.equal(outside.stdout, "PING\n");
 });

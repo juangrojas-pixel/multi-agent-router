@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fixture, runCli, scratchConfig } from "./fixtures/helpers.ts";
 
@@ -55,8 +55,32 @@ const cases: Array<[string, object, string]> = [
   ["dispatch concurrency below 1", { dispatch: { concurrency: 0 } },
     "config: dispatch.concurrency: must be an integer >= 1"],
   ["unknown benchmark parser", { benchmarks: { sources: [{ id: "x", url: "file:///x", parse: "csv" }] } },
-    "config: benchmarks.sources[0].parse: unknown parser: csv (use models-dev, lmarena-hf, openrouter or artificial-analysis)"],
+    "config: benchmarks.sources[0].parse: unknown parser: csv (use models-dev, lmarena-hf, openrouter, artificial-analysis or epoch-zip)"],
 ];
+
+const epochFile = { file: "x.csv", model_column: "Model", score_column: "Score" };
+const epochCases: Array<[string, object, string]> = [
+  ["missing files", { files: undefined }, "files: must be a non-empty object"],
+  ["unknown kind", { files: { typo: epochFile } }, "files.typo: unknown kind: typo"],
+  ...["file", "model_column", "score_column"].map((field): [string, object, string] =>
+    [`empty ${field}`, { files: { code: { ...epochFile, [field]: " " } } }, `files.code.${field}: must be a non-empty string`]),
+  ["unknown band", { score_bands: { wrong: 0.5 } }, "score_bands.wrong: unknown tier: wrong"],
+  ["high band threshold", { score_bands: { strong: 1.01 } }, "score_bands.strong: must be a number in [0,1]"],
+  ["low band threshold", { score_bands: { strong: -0.01 } }, "score_bands.strong: must be a number in [0,1]"],
+];
+for (const [name, fields, error] of epochCases) {
+  test(`Epoch config rejects ${name}`, (t) => {
+    const s = scratchConfig(base({ kinds: ["code"], capability_tiers: ["light", "strong"], benchmarks: { sources: [
+      { id: "epoch", url: "file:///x", parse: "epoch-zip", files: { code: epochFile }, ...fields },
+    ] } }));
+    t.after(() => rmSync(s.root, { recursive: true, force: true }));
+    const result = runCli(["catalog", "--refresh"], s.env);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, `[ask-agent] config: benchmarks.sources[0].${error}\n`);
+    assert.equal(existsSync(join(s.env.XDG_CACHE_HOME!, "multi-agent-router", "benchmarks.json")), false);
+  });
+}
 
 const agentCases: Array<[string, object, string]> = [
   ["unknown list_models parser", { list_models: { cmd: ["x"], parse: "xml" } },

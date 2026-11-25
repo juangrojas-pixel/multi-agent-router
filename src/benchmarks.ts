@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
-import type { Config } from "./config.ts";
+import { crc32, inflateRawSync } from "node:zlib";
+import type { Config, BenchmarkSource as Source } from "./config.ts";
 import { readCache, writeCache } from "./state.ts";
 
-type Source = NonNullable<NonNullable<Config["benchmarks"]>["sources"]>[number] & {
-  categories?: Record<string, string[]>; tier_bands?: Record<string, number>; api_key?: string;
+type Score = ({ rank: number; rating: number; score?: never } | { score: number; rank?: never; rating?: never }) & {
+  source: string; date: string;
 };
-type Score = { rank: number; rating: number; source: string; date: string };
 type Model = {
   price_out_per_m?: number; price_source?: string; context?: number; release_date?: string;
   scores?: Record<string, Score>; tier?: Record<string, string>;
@@ -85,7 +85,8 @@ function arenaModels(rows: ArenaRow[], source: Source, config: Config, date: str
       if (!categories.includes(row.category ?? "")) continue;
       const model = models[normalize(row.model_name)] ??= {};
       const scores = model.scores ??= Object.create(null);
-      if (scores[kind] && scores[kind].rank <= row.rank) continue;
+      const existing = own(scores, kind);
+      if (existing?.rank !== undefined && existing.rank <= row.rank) continue;
       scores[kind] = { rank: row.rank, rating: row.rating, source: source.id, date: row.leaderboard_publish_date || date };
       const tiers = config.capability_tiers ?? [];
       const tier = tiers.findLast((name) => row.rank! <= (own(source.tier_bands, name) ?? 0)) ?? tiers[0];
@@ -112,6 +113,109 @@ function arrayModels(payload: { data?: PriceEntry[] }, source: Source): Models {
   return models;
 }
 
+function zipEntries(zip: Buffer) {
+  // The EOCD can be followed by a ZIP comment of up to 65535 bytes.
+  let end = zip.length - 22;
+  for (; end >= Math.max(0, zip.length - 22 - 0xffff); end--) {
+    if (zip.readUInt32LE(end) === 0x06054b50 && end + 22 + zip.readUInt16LE(end + 20) === zip.length) break;
+  }
+  if (end < Math.max(0, zip.length - 22 - 0xffff)) throw new Error("missing ZIP directory");
+  const count = zip.readUInt16LE(end + 10);
+  const start = zip.readUInt32LE(end + 16);
+  if (zip.readUInt32LE(end + 4) !== 0 || zip.readUInt16LE(end + 8) !== count || start + zip.readUInt32LE(end + 12) !== end) {
+    throw new Error("unsupported ZIP directory");
+  }
+  const entries = new Map<string, number>();
+  let offset = start;
+  for (let i = 0; i < count; i++) {
+    if (offset + 46 > end || zip.readUInt32LE(offset) !== 0x02014b50) throw new Error("invalid ZIP directory entry");
+    const nameEnd = offset + 46 + zip.readUInt16LE(offset + 28);
+    const next = nameEnd + zip.readUInt16LE(offset + 30) + zip.readUInt16LE(offset + 32);
+    if (next > end) throw new Error("truncated ZIP directory entry");
+    const name = zip.toString("utf8", offset + 46, nameEnd).split("/").at(-1)!;
+    if (name && !entries.has(name)) entries.set(name, offset);
+    offset = next;
+  }
+  return (name: string): string => {
+    const entry = entries.get(name);
+    if (entry === undefined) throw new Error("missing ZIP entry");
+    const method = zip.readUInt16LE(entry + 10);
+    if (method !== 0 && method !== 8) throw new Error("unsupported ZIP compression method");
+    const local = zip.readUInt32LE(entry + 42);
+    if (local + 30 > start || zip.readUInt32LE(local) !== 0x04034b50 ||
+        zip.readUInt16LE(local + 8) !== method || (zip.readUInt16LE(entry + 8) & 1)) {
+      throw new Error("invalid ZIP local header");
+    }
+    const from = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
+    const to = from + zip.readUInt32LE(entry + 20);
+    const size = zip.readUInt32LE(entry + 24);
+    if (to > start || size > 64 * 1024 * 1024) throw new Error("ZIP entry exceeds bounds");
+    const bytes = zip.subarray(from, to);
+    const data = method === 0 ? bytes : inflateRawSync(bytes, { maxOutputLength: Math.max(size, 1) });
+    if (data.length !== size || crc32(data) !== zip.readUInt32LE(entry + 16)) throw new Error("corrupt ZIP entry");
+    return data.toString("utf8");
+  };
+}
+
+function* csvRows(csv: string): Generator<string[]> {
+  let row: string[] = [], field = "", quoted = false;
+  for (let i = 0; i < csv.length; i++) {
+    const char = csv[i];
+    if (quoted) {
+      if (char !== '"') field += char;
+      else if (csv[i + 1] === '"') { field += '"'; i++; }
+      else quoted = false;
+    } else if (char === '"' && !field) quoted = true;
+    else if (char === "," || char === "\r" || char === "\n") {
+      row.push(field);
+      field = "";
+      if (char !== ",") {
+        if (char === "\r" && csv[i + 1] === "\n") i++;
+        yield row;
+        row = [];
+      }
+    } else field += char;
+  }
+  if (quoted) throw new Error("unterminated CSV quote");
+  if (row.length || field) yield [...row, field];
+}
+
+function epochModels(zip: Buffer, source: Source, config: Config, date: string): Models {
+  const models: Models = Object.create(null);
+  const extract = zipEntries(zip);
+  const tiers = config.capability_tiers ?? [];
+  for (const [kind, spec] of Object.entries(source.files ?? {})) {
+    const rows = csvRows(extract(spec.file).replace(/^\uFEFF/, ""));
+    const header = rows.next().value ?? [];
+    const modelColumn = header.indexOf(spec.model_column);
+    const scoreColumn = header.indexOf(spec.score_column);
+    const dateColumn = header.findIndex((name) => /^(?:model )?release[ _]date$/i.test(name.trim()));
+    if (modelColumn < 0 || scoreColumn < 0) throw new Error("missing benchmark CSV column");
+    for (const row of rows) {
+      const id = normalize(row[modelColumn]?.trim().replace(/_\w+$/, "") ?? "");
+      const value = row[scoreColumn]?.trim();
+      const score = Number(value);
+      if (!id || !value || !number(score) || score > 1) continue;
+      const model = models[id] ??= {};
+      const scores = model.scores ??= Object.create(null);
+      const existing = own(scores, kind);
+      if (existing?.score !== undefined && existing.score >= score) continue;
+      scores[kind] = { score, source: source.id, date: row[dateColumn]?.trim() || date };
+      const tier = tiers.findLast((name) => score >= (own(source.score_bands, name) ?? Infinity)) ?? tiers[0];
+      if (tier !== undefined) (model.tier ??= Object.create(null))[kind] = tier;
+    }
+  }
+  return models;
+}
+
+async function readZip(url: URL, signal: AbortSignal): Promise<Buffer> {
+  if (url.protocol === "file:") return readFile(url, { signal });
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("unsupported source protocol");
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return Buffer.from(await response.arrayBuffer());
+}
+
 async function readSource(url: URL, signal: AbortSignal, apiKey?: string) {
   if (url.protocol === "file:") return JSON.parse(await readFile(url, { encoding: "utf8", signal }));
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("unsupported source protocol");
@@ -126,6 +230,7 @@ async function fetchModels(source: Source, config: Config, date: string): Promis
   // One timeout per request: a shared one made a paginated source fail when pages and the other
   // sources were fetched at the same time.
   const signal = () => AbortSignal.timeout(15_000);
+  if (source.parse === "epoch-zip") return epochModels(await readZip(url, signal()), source, config, date);
   const payload = await readSource(url, signal(), source.parse === "artificial-analysis" ? source.api_key : undefined);
   if (source.parse === "models-dev") return modelsDev(payload, source);
   if (source.parse !== "lmarena-hf") return arrayModels(payload, source);
@@ -192,10 +297,12 @@ export async function refreshBenchmarks(config: Config): Promise<BenchmarkCache>
       const { scores, tier, ...metadata } = value;
       Object.assign(model, metadata);
       for (const [kind, score] of Object.entries(scores ?? {})) {
-        const existing = own(model.scores, kind);
-        if (existing && existing.rank <= score.rank) continue;
-        (model.scores ??= Object.create(null))[kind] = score;
+        if (own(model.tier, kind) !== undefined) continue;
         const measuredTier = own(tier, kind);
+        const existing = own(model.scores, kind);
+        if (measuredTier !== undefined || !existing || (score.rank !== undefined && existing.rank !== undefined && score.rank < existing.rank)) {
+          (model.scores ??= Object.create(null))[kind] = score;
+        }
         if (measuredTier !== undefined) (model.tier ??= Object.create(null))[kind] = measuredTier;
       }
     }

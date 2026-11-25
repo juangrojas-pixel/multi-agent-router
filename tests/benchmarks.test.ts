@@ -87,3 +87,66 @@ test("unreachable source preserves its cached scores and date, with no backgroun
   assert.ok(text.includes(`arena ${previous.sources.arena.fetched_at.slice(0, 10)} stale`));
   assert.ok(text.includes("gemini-4-neon-xhigh  code=light*  review=light  $out/M=15"));
 });
+
+test("Epoch ZIP measures code first, with per-kind fallback and declared overrides", (t) => {
+  const modelIds = ["opus", "claude-sonnet-5-5-high", "gemini-4-carbon-high", "gpt-6-astra", "low-model", "gpt-5.6-sol", "arena-only"];
+  const base = baseConfig() as { agents: { one: Record<string, unknown> } };
+  const epoch = { id: "epoch", parse: "epoch-zip", url: "", files: {
+    code: { file: "frontierswe_external.csv", model_column: "Model version", score_column: "Score" },
+    review: { file: "stored.csv", model_column: "Model version", score_column: "Score" },
+  }, score_bands: { frontier: 0.60, strong: 0.50, standard: 0.35 } };
+  const arena = { id: "arena", parse: "lmarena-hf", url: "", categories: { code: ["coding"], writing: ["creative_writing"] }, tier_bands: { frontier: 5, strong: 15, standard: 40 } };
+  const config = { ...base, agents: { one: { ...base.agents.one, models: modelIds } },
+    capability_tiers: ["light", "standard", "strong", "frontier"], kinds: ["code", "writing", "review"],
+    model_aliases: { opus: "claude-opus-5-5" }, models: { "gpt-6-astra": { tier: { code: "standard" } } },
+    benchmarks: { sources: [epoch, arena] } };
+  const s = scratchConfig(config);
+  t.after(() => rmSync(s.root, { recursive: true, force: true }));
+  const zip = readFileSync(new URL("epoch.zip", fixtures));
+  const zipPath = join(s.root, "epoch.zip");
+  const arenaPath = join(s.root, "arena.json");
+  writeFileSync(zipPath, zip);
+  const arenaRow = (model_name: string, category: string, rank: number) => ({ row: { model_name, category, rank, rating: 1500, leaderboard_publish_date: "2026-11-22" } });
+  writeFileSync(arenaPath, JSON.stringify({ rows: [arenaRow("claude-sonnet-5-5", "coding", 1),
+    arenaRow("claude-sonnet-5-5", "creative_writing", 32), arenaRow("arena-only", "coding", 1)] }));
+  epoch.url = pathToFileURL(zipPath).href;
+  arena.url = pathToFileURL(arenaPath).href;
+  writeFileSync(s.config, JSON.stringify(config));
+  const run = (...args: string[]) => {
+    const result = runCli(["catalog", "--refresh", ...args], s.env);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    return result.stdout;
+  };
+  const cache = () => JSON.parse(readFileSync(join(s.env.XDG_CACHE_HOME!, "multi-agent-router", "benchmarks.json"), "utf8"));
+  const output = JSON.parse(run("--json"));
+  const initial = cache();
+  const date = initial.sources.epoch.fetched_at;
+  assert.equal(initial.sources.epoch.status, "fresh");
+  const measured = (score: number, date: string) => ({ score, date, source: "epoch" });
+  const ranked = (rank: number) => ({ rank, rating: 1500, source: "arena", date: "2026-11-22" });
+  const expected = [
+    ["claude-opus-5-5", { code: "frontier" }, { code: measured(0.61, "2026-11-20") }],
+    ["claude-sonnet-5-5", { code: "strong", writing: "standard" }, { code: measured(0.50, date), writing: ranked(32) }],
+    ["gemini-4-carbon", { code: "standard" }, { code: measured(0.35, date) }],
+    ["gpt-6-astra", { code: "frontier" }, { code: measured(0.60, date) }],
+    ["low-model", { code: "light" }, { code: measured(0.1, date) }],
+    ["gpt-5-6-sol", { review: "strong" }, { review: measured(0.51, date) }],
+    ["arena-only", { code: "frontier" }, { code: ranked(1) }],
+  ] as const;
+  assert.deepEqual(initial.models, Object.fromEntries(expected.map(([id, tier, scores]) => [id, { tier, scores }])));
+  assert.deepEqual(output.agents.one.models, expected.map(([, tier, scores], i) => ({ id: modelIds[i], status: "unverified", profile: {
+    scores, tier: i === 3 ? { code: "standard" } : tier,
+    tier_source: Object.fromEntries(Object.keys(tier).map((kind) => [kind, i === 3 ? "declared" : "measured"])),
+  } })));
+
+  // Set both headers of the deflated entry to an unsupported method.
+  zip.writeUInt16LE(99, 8);
+  zip.writeUInt16LE(99, zip.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])) + 10);
+  writeFileSync(zipPath, zip);
+  const text = run();
+  assert.deepEqual(cache().models, initial.models);
+  assert.deepEqual(cache().sources.epoch, { fetched_at: date, status: "stale", error: "benchmark fetch or parse failed" });
+  assert.ok(text.includes(`sources: epoch ${date.slice(0, 10)} stale, arena `));
+  assert.ok(text.includes("claude-sonnet-5-5-high  code=strong  writing=standard"));
+});

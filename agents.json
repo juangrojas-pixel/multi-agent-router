@@ -33,6 +33,15 @@
         "parse": "models-dev"
       },
       {
+        "id": "epoch",
+        "url": "https://epoch.ai/data/benchmark_data.zip",
+        "parse": "epoch-zip",
+        "files": {
+          "code": { "file": "frontierswe_external.csv", "model_column": "Model version", "score_column": "Score" }
+        },
+        "score_bands": { "frontier": 0.6, "strong": 0.5, "standard": 0.35 }
+      },
+      {
         "id": "lmarena",
         "url": "https://datasets-server.huggingface.co/filter?dataset=lmarena-ai/leaderboard-dataset&config=text&split=latest&where=%22category%22%3D%27coding%27%20OR%20%22category%22%3D%27webdev%27%20OR%20%22category%22%3D%27math%27%20OR%20%22category%22%3D%27hard_prompts%27%20OR%20%22category%22%3D%27creative_writing%27%20OR%20%22category%22%3D%27instruction_following%27&offset=0&length=100",
         "parse": "lmarena-hf",

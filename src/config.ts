@@ -16,6 +16,12 @@ export type Agent = {
 // A role entry is an agent id, or an agent id with its own model and effort.
 export type RoleAgent = string | { agent: string; model?: string; effort?: string };
 export type Role = { description: string; agents: RoleAgent[]; model?: string; effort?: string; prompt_preamble?: string };
+type BenchmarkFile = { file: string; model_column: string; score_column: string };
+export type BenchmarkSource = {
+  id: string; url: string; parse: string;
+  categories?: Record<string, string[]>; tier_bands?: Record<string, number>; api_key?: string;
+  files?: Record<string, BenchmarkFile>; score_bands?: Record<string, number>;
+};
 export type Config = {
   cooldown_seconds?: number; default_tier?: string; tiers?: Record<string, string[]>; agents: Record<string, Agent>;
   roles?: Record<string, Role>; orchestrator?: { agent: string }; routing?: { notes?: string; general?: string; rules?: Array<{ role?: string }> };
@@ -23,12 +29,12 @@ export type Config = {
   capability_tiers?: string[]; kinds?: string[]; sizes?: Record<string, number>; cost_ceiling?: number;
   dispatch?: { concurrency?: number }; models?: Record<string, { tier?: Record<string, string> }>;
   model_aliases?: Record<string, string>;
-  benchmarks?: { max_age_days?: number; sources?: Array<{ id: string; url: string; parse: string }> };
+  benchmarks?: { max_age_days?: number; sources?: BenchmarkSource[] };
 };
 
 const outputs = ["text", "agy-json", "opencode-events", "claude-json"];
 export const listParsers = ["tsv", "lines-first-field", "pi-table"];
-export const benchmarkParsers = ["models-dev", "lmarena-hf", "openrouter", "artificial-analysis"];
+export const benchmarkParsers = ["models-dev", "lmarena-hf", "openrouter", "artificial-analysis", "epoch-zip"];
 
 function badCommand(cmd: unknown): boolean {
   return !Array.isArray(cmd) || typeof cmd[0] !== "string" || cmd[0] === "";
@@ -92,8 +98,27 @@ function validateDispatcher(config: Config): string | null {
   const concurrency = config.dispatch?.concurrency;
   if (concurrency !== undefined && !(Number.isInteger(concurrency) && concurrency >= 1)) return "dispatch.concurrency: must be an integer >= 1";
   for (const [index, source] of (config.benchmarks?.sources ?? []).entries()) {
+    const key = `benchmarks.sources[${index}]`;
     if (!benchmarkParsers.includes(source.parse)) {
-      return `benchmarks.sources[${index}].parse: unknown parser: ${source.parse} (use models-dev, lmarena-hf, openrouter or artificial-analysis)`;
+      return `${key}.parse: unknown parser: ${source.parse} (use models-dev, lmarena-hf, openrouter, artificial-analysis or epoch-zip)`;
+    }
+    if (source.parse === "epoch-zip") {
+      if (!isObject(source.files) || !Object.keys(source.files).length) return `${key}.files: must be a non-empty object`;
+      for (const [kind, entry] of Object.entries(source.files)) {
+        const fileKey = `${key}.files.${kind}`;
+        if (!config.kinds?.includes(kind)) return `${fileKey}: unknown kind: ${kind}`;
+        if (!isObject(entry)) return `${fileKey}: must be an object`;
+        for (const field of ["file", "model_column", "score_column"] as const) {
+          if (typeof entry[field] !== "string" || !entry[field].trim()) return `${fileKey}.${field}: must be a non-empty string`;
+        }
+      }
+    }
+    if (source.score_bands !== undefined) {
+      if (!isObject(source.score_bands)) return `${key}.score_bands: must be an object`;
+      for (const [tier, score] of Object.entries(source.score_bands)) {
+        if (!tiers?.includes(tier)) return `${key}.score_bands.${tier}: unknown tier: ${tier}`;
+        if (!Number.isFinite(score) || score < 0 || score > 1) return `${key}.score_bands.${tier}: must be a number in [0,1]`;
+      }
     }
   }
   return null;

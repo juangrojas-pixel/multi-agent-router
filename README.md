@@ -109,8 +109,11 @@ Parsers: `tsv` (first tab field), `lines-first-field` (first word of lines that 
 With `benchmarks` configured, only `ask-agent catalog --refresh` fetches benchmark sources. Plain `catalog` reads the cache, and `preflight` only checks its age. If a source is unreachable, the last successful data and date stay visible as `stale`; a source with no cached data is `failed`. The `sources:` line shows each source's date and status (`-` means no successful fetch).
 
 - [models.dev](https://models.dev/) supplies primary output prices in USD per million tokens and model metadata. [OpenRouter](https://openrouter.ai/) supplies fallback prices for models absent from models.dev.
+- [Epoch AI](https://epoch.ai/) supplies FrontierSWE agentic-coding scores. The `epoch-zip` parser uses `files` to map kinds to ZIP CSV filenames and model/score columns, and `score_bands` to set tier thresholds from 0 to 1.
 - [LMArena's leaderboard dataset](https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)) supplies ratings and ranks. The best rank among each kind's mapped categories determines its measured tier.
 - [Artificial Analysis](https://artificialanalysis.ai/) is an optional speed source. It requires attribution and an API key in `benchmarks.sources[].api_key` in private policy, never in the repository. Private policy replaces the `sources` array, so include the public sources you want to retain. Without a key, that source is skipped without a request.
+
+For each model and kind, the first source in `benchmarks.sources` that measures a tier wins. By default Epoch decides `code` where it has a score; LMArena covers other kinds and models missing from Epoch.
 
 Set `model_aliases` for names that don't match after normalization. A tier declared in `models.<id>.tier` overrides a measured one and is marked `*`. `$out/M` is a price indicator, not a subscription charge. `catalog --json` adds `profile` to each model; `null` means no benchmark data or declared tier, and the text view adds nothing for that model.
 

@@ -7,6 +7,7 @@ import { clearCooldown, jqText, runsFile, runsTable } from "./state.ts";
 import { buildCatalog, catalogCommand } from "./catalog.ts";
 import { preflightCommand } from "./preflight.ts";
 import { candidatesCommand } from "./candidates.ts";
+import { dispatchCommand } from "./dispatch.ts";
 
 const original = process.argv.slice(2);
 const NESTED = "error: nested call refused: ask-agent is already running an agent";
@@ -89,6 +90,7 @@ if (original[0] === "status") process.exit(status());
 if (original[0] === "catalog") process.exit(await catalogCommand(config, original.slice(1)));
 if (original[0] === "preflight") process.exit(await preflightCommand(config, original.slice(1)));
 if (original[0] === "candidates") process.exit(await candidatesCommand(config, original.slice(1)));
+if (original[0] === "dispatch") process.exit(await dispatchCommand(config, original.slice(1)));
 if (original[0] === "reset") {
   const agent = original[1] ?? "";
   clearCooldown(agent);
@@ -166,6 +168,7 @@ for (let index = 0; index < args.length; index += 1) {
       "  ask-agent catalog [-a AGENT] [--refresh] [--json]             usable models per agent, with status and quota",
       "  ask-agent preflight [--json]                                  versions, quotas, models, data freshness (reports only)",
       "  ask-agent candidates --kind K --tier T [--size s|m|l] [--client] [-n N] [--json]  agent/model pairs, cheapest capable first",
+      "  ask-agent dispatch [-f FILE | -] [--json]                     run a batch of distinct tasks in parallel, one receipt each",
       "  ask-agent reset [AGENT]                                       clear cooldowns",
       "  ask-agent runs [N] [-a AGENT]                                 run history (runs.jsonl)",
       "Tiers: think | execute | draft (see agents.json). Prompt is read from stdin if omitted.",

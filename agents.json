@@ -37,9 +37,17 @@
         "url": "https://epoch.ai/data/benchmark_data.zip",
         "parse": "epoch-zip",
         "files": {
-          "code": { "file": "frontierswe_external.csv", "model_column": "Model version", "score_column": "Score" }
+          "code": {
+            "file": "frontierswe_external.csv",
+            "model_column": "Model version",
+            "score_column": "Score"
+          }
         },
-        "score_bands": { "frontier": 0.6, "strong": 0.5, "standard": 0.35 }
+        "score_bands": {
+          "frontier": 0.6,
+          "strong": 0.5,
+          "standard": 0.35
+        }
       },
       {
         "id": "lmarena",
@@ -124,11 +132,11 @@
     "docs": {
       "description": "Drafts low-stakes text: docs, summaries, changelogs.",
       "agents": [
+        "opencode",
         {
           "agent": "agy",
           "model": "gemini-4-hydrogen-medium"
-        },
-        "opencode"
+        }
       ]
     },
     "reports": {
@@ -363,6 +371,12 @@
         "review": "strong"
       },
       "note": "Declared by the user (2026-11-25): LMArena ranks it 109 in coding (chat preference) and FrontierSWE has no gpt-6.2-sol entry; gpt-6-astra, same family, is #2 on FrontierSWE."
+    },
+    "big-pickle": {
+      "tier": {
+        "writing": "standard"
+      },
+      "note": "Declared (2026-11-25): free opencode model for docs; no benchmark covers it. Writing only, never code."
     }
   }
 }

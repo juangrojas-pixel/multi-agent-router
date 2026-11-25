@@ -153,3 +153,13 @@ test("without a backend setting, a router inside an hc terminal uses hc; elsewhe
   assert.doesNotMatch(outside.stderr, /hc terminal/);
   assert.equal(outside.stdout, "PING\n");
 });
+
+test("the hc terminal first shows who works on what, and that header never reaches the answer", () => {
+  const s = setup();
+  const result = runCli(["--backend", "hc", "-a", "one", "-m", "m-x", "--task", "T3", "--reason", "cheap and enough", "PING"], s.env);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "PING\n");
+  const screen = readFileSync(join(s.root, "hc-state", "screen"), "utf8");
+  assert.match(screen, /^▶ one · m-x · task T3\n {2}reason: cheap and enough\n {2}prompt: PING\n {2}working… \(the answer appears here when the agent finishes\)\n/);
+  assert.match(screen, /PING\n$/);
+});

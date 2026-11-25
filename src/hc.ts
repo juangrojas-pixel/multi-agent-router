@@ -9,6 +9,7 @@ export type ProcessResult = { stdout: string; stderr: string; status: number; ti
 // (tee) and keeps stdout, stderr and the exit code in files the router reads afterwards.
 const runScript = `d="$1"; shift
 while IFS= read -r -d '' kv; do export "$kv" 2>/dev/null; done <"$d/env"
+[ -f "$d/banner" ] && cat "$d/banner"
 "$@" </dev/null 2> >(tee "$d/err" >&2) | tee "$d/out"
 rc=\${PIPESTATUS[0]}
 wait $! 2>/dev/null
@@ -71,6 +72,7 @@ export async function hcRun(
   timeoutSeconds: number,
   fallback: () => Promise<ProcessResult>,
   label = "",
+  banner = "",
 ): Promise<ProcessResult> {
   // `<agent>-<task or model>-<pid>`: readable in the Herdr app, unique among live terminals.
   const suffix = `-${process.pid}`;
@@ -80,6 +82,9 @@ export async function hcRun(
   const env = { ...process.env, ASK_AGENT_DEPTH: "1" };
   writeFileSync(join(dir, "env"), Object.entries(env).map(([key, value]) => `${key}=${value}\0`).join(""));
   writeFileSync(join(dir, "run"), runScript);
+  // Shown on the terminal before the agent starts (agents in print/JSON mode print nothing until
+  // they finish); it goes to the screen only, never into the captured answer.
+  if (banner) writeFileSync(join(dir, "banner"), banner);
   const started = await capture(hc, [
     "run", "--bg", "--json", "--no-notify", "--name", name, "--label", "ask-agent=1",
     "--cwd", process.cwd(), "--", "bash", join(dir, "run"), dir, command, ...args,

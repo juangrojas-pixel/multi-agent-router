@@ -102,6 +102,19 @@ export function modelProblem(id: string, config: Config, model: string): string 
   return null;
 }
 
+// The header an hc terminal shows while the agent works: who, with which model, on what and why.
+function terminalBanner(id: string, model: string, prompt: string): string {
+  const oneLine = prompt.replace(/\s+/g, " ").trim();
+  const shown = oneLine.length > 300 ? `${oneLine.slice(0, 300)}…` : oneLine;
+  return [
+    `▶ ${[id, model || "default model", runContext.task ? `task ${runContext.task}` : ""].filter(Boolean).join(" · ")}`,
+    ...(runContext.reason ? [`  reason: ${runContext.reason}`] : []),
+    `  prompt: ${shown}`,
+    "  working… (the answer appears here when the agent finishes)",
+    "",
+  ].join("\n");
+}
+
 // Backend precedence: the --backend flag, then agents.<id>.backend, then backend, then auto.
 let backendFlag = "";
 export function setBackendFlag(value: string): void { backendFlag = value; }
@@ -187,7 +200,7 @@ async function execute(
   const backend = backendFor(id, config);
   const herdr = (config as Config & { herdr_command?: string }).herdr_command || "herdr";
   const result = backend === "hc"
-    ? await hcRun(hc, id, agent.command, args, timeoutSeconds, subprocess, runContext.task || model)
+    ? await hcRun(hc, id, agent.command, args, timeoutSeconds, subprocess, runContext.task || model, terminalBanner(id, model, prompt))
     : backend === "herdr"
       ? await herdrRun({ herdr, agentId: id, model, task: runContext.task, command: agent.command, args, timeoutSeconds }, subprocess)
       : await subprocess();

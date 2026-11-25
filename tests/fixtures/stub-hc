@@ -12,7 +12,8 @@ case "$1" in
     shift
     # "$@" is now: bash RUN_SCRIPT DIR COMMAND ARGS...
     printf '%s\n' "$3" >"$state/dir"
-    setsid "$@" >/dev/null 2>&1 </dev/null &
+    # The terminal screen (what the Herdr app shows) goes to $state/screen.
+    setsid "$@" >"$state/screen" 2>&1 </dev/null &
     printf '%s\n' "$!" >"$state/pid"
     echo '{"address":"t1"}'
     ;;

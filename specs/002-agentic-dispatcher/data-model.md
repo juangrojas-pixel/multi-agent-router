@@ -80,7 +80,7 @@ Existing fields unchanged.
   Ranking: meets `min_tier` for `kind` -> not `out_of_quota` -> lowest `est_cost` -> highest
   score. `est_cost = price_out_per_m * sizes[size] / 1e6`; free models cost 0.
 - **DispatchBatch**: `{ batch_id, tasks: [{ id, agent|role, model?, cwd, writes[], prompt,
-  client?, fallback? }] }`.
+  reason?, client?, fallback? }] }`.
   Rules: no two tasks' `writes` overlap (path prefix); each `model` usable for its agent; a task
   with `client: true` may only name agents in private policy `client_agents` (FR-018).
 - **Private policy addition** (`policy.json`): `client_agents: ["claude", "gentle-shell"]`.

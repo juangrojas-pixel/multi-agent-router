@@ -26,5 +26,5 @@ Tests use stub agents and `file://` fixture sources under `tests/fixtures/benchm
    ```bash
    ask-agent dispatch -f batch.json
    ```
-   Expect two receipts and two `runs.jsonl` entries with `batch_id`, `task_id`, `reason`.
+   Give each task a `reason`. Expect two receipts and two `runs.jsonl` entries with `batch_id`, `task_id`, `reason`.
 5. Same batch with overlapping `writes`: exit 2 before any agent starts.

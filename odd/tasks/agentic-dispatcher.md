@@ -24,6 +24,7 @@ Task IDs are those of `specs/002-agentic-dispatcher/tasks.md`.
 - [x] P3 US2 T006-T010 (S3). Route: inline by Claude, in parallel with P4. RED 4 failing, GREEN 9/9; full suites green (124 node excl. catalog, 35 parity, 51 route-hint). Commit `ea96727`.
 - [x] P4 US1 T011-T014 (S2). Route: delegated to gentle-shell on `openai-codex/gpt-6.2-sol` (writer reason: parallel unit with P3, disjoint surfaces; user rule "te lo repartis con gentle-shell"). `src/cli.ts` wiring done by parent before launch. RED 4 observed by the writer; seam check 128/128. `pi-table` parser added inline after the real run (RED 1, GREEN 129/129). Commit `ea96727`.
 - [x] P5 US3 T015-T017 (S4). Route: delegated to gentle-shell on `openai-codex/gpt-6.2-sol` (parallel with the verifier fix and model_source work). Seam check 145/145, 35, 51. Commit `3e11b64`.
+- [ ] P5b Hardening from RDD advisories (S2-S4): stale catalog gate (a new model stays refused until `catalog --refresh`), list timeout cap in preflight, quota worker failure marking every agent, cache omitting newly enabled agents, newer-than-latest version shown as unknown, model check only on named agents (not fallbacks). Not started.
 - [ ] P6 US6 T001, T018-T020 (S7). Not this session.
 - [ ] P7 US4 T021-T022 (S5). Not this session.
 - [ ] P8 US5 T002, T023-T025 (S6). Not this session.
@@ -43,3 +44,22 @@ Task IDs are those of `specs/002-agentic-dispatcher/tasks.md`.
 - L10 (2026-11-25) Independent verifier (`ask-agent -r verify`, agy gemini-4-neon-high) on ed66a56..ea96727: S2 PASS, regression vs 97eeb64 PASS on fresh cache; S3 FAIL, 1 blocker at src/run.ts:86-97 (catalog entry with source config and empty models blocked any -m on an agent without config models). One correction batch: probe added as regression test (RED observed, GREEN), modelProblem now trusts the catalog only when source is cli. Advisories: decimal pi-table context fixed (RED, GREEN); empty capability tier name rejected (test and fix written together, no RED observed); lines-first-field alpha-only ids and per-agent `source` placement left as documented. Scratch dirs reported by the verifier: /tmp/verify-base-llIdqv, /tmp/verify-cand-QI20jD, /tmp/verify-probe-L3iO7K.
 - L11 (2026-11-25) Real samples (quota spent with user consent): agy JSON and opencode events report tokens, not the model; `claude -p --output-format json` reports modelUsage. Added claude-json parser and tokens_in/tokens_out (commit `fe3bedf`; T008 now complete for claude, requested-only for the others). Real probe: `-a claude -m haiku` recorded model claude-haiku-5-5, model_source reported.
 - L12 (2026-11-25) Preflight receipt from gentle-shell incomplete (exited while its suites were queued). Parent seam check green; real `ask-agent preflight`: 26.2 s (under SC-003), all versions current except agy unknown (no latest source), benchmarks not configured, exit 0. Commit `3e11b64`. Next: RDD review of ed66a56..3e11b64 (high_risk), then P6 benchmarks.
+- L13 (2026-11-25) RDD review of ed66a56..3e11b64 (user granted; lenses risk, resilience, readability, reliability): approved, receipt acknowledged (lineage review-a223e81b57ab946c). Non-blocking findings, kept as P5b follow-up:
+  - R2-agy-hardcoded-quota (readability, WARNING) src/catalog.ts:104
+  - R2-duplicated-list-runners (readability, SUGGESTION) src/catalog.ts:90-101
+  - R2-model-check-scope (readability, WARNING) src/cli.ts:216-219
+  - R2-modelproblem-naming (readability, SUGGESTION) src/run.ts:90-91
+  - R2-preflight-failed-outdated-names (readability, WARNING) src/preflight.ts:68-69
+  - R2-preflight-list-timeout-cap (readability, WARNING) src/catalog.ts:95
+  - R2-test-message-mismatch (readability, SUGGESTION) tests/preflight.test.ts:119
+  - R2-version-newer-unknown (readability, SUGGESTION) src/preflight.ts:30
+  - R3-cache-omits-new-agents (reliability, WARNING) src/catalog.ts:184-185
+  - R3-claude-tokens-in (reliability, SUGGESTION) src/agents.ts:55
+  - R3-fallback-unchecked (reliability, WARNING) src/cli.ts:216-219
+  - R3-preflight-timeout-cap (reliability, WARNING) src/catalog.ts:95
+  - R3-quota-worker-fails-all (reliability, WARNING) src/catalog.ts:103-107
+  - R3-stale-catalog-gate (reliability, WARNING) src/run.ts:90-95
+  - R3-unverified-test-path (reliability, SUGGESTION) tests/run-record.test.ts:98-105
+  - R3-version-newer-unknown (reliability, WARNING) src/preflight.ts:29-30
+  - R4-preflight-list-timeout-cap (resilience, WARNING) src/catalog.ts:95
+  - R4-stale-catalog-gate (resilience, WARNING) src/run.ts:88-96

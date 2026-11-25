@@ -122,10 +122,11 @@ test("pi-table joins provider and model columns and skips warnings and the heade
     "provider      model          context  max-out  thinking  images",
     "openai-codex  gpt-6.2-sol    272K     128K     yes       yes",
     "openai        gpt-6.1-terra  400K     128K     yes       yes",
+    "openai        gpt-7          1.05M    128K     yes       yes",
     "",
   ].join("\n");
   const { env, cache } = setup(t, { pi: { ...agent, list_models: list(table, "pi-table") } });
   const catalog = json(["--refresh"], env);
-  assert.deepEqual(catalog.agents.pi.models, [usable("openai-codex/gpt-6.2-sol"), usable("openai/gpt-6.1-terra")]);
+  assert.deepEqual(catalog.agents.pi.models, [usable("openai-codex/gpt-6.2-sol"), usable("openai/gpt-6.1-terra"), usable("openai/gpt-7")]);
   assert.deepEqual(saved(cache).agents.pi.models, catalog.agents.pi.models);
 });

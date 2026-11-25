@@ -76,6 +76,17 @@
       "enabled": true,
       "description": "GPT via ChatGPT subscription, pi without gentle-ai (no setup, skills, extensions or context files)",
       "command": "pi",
+      "version_cmd": [
+        "pi",
+        "--version"
+      ],
+      "latest_cmd": [
+        "npm",
+        "view",
+        "@earendil-works/pi-coding-agent",
+        "version"
+      ],
+      "update_cmd": "pi update self",
       "model": "openai-codex/gpt-6.1-sol",
       "timeout_seconds": 900,
       "extra_args": [
@@ -95,6 +106,12 @@
       "enabled": true,
       "description": "Antigravity CLI on its own quota (Gemini 4 Hydrogen by default, Neon for think/verify roles); executes easy, well-specified tasks",
       "command": "agy",
+      "version_cmd": [
+        "agy",
+        "--version"
+      ],
+      "latest_cmd": null,
+      "update_cmd": "agy update",
       "model": "gemini-4-hydrogen-high",
       "timeout_seconds": 1800,
       "extra_args": [],
@@ -120,6 +137,17 @@
       "enabled": true,
       "description": "OpenCode with a free model (build agent); executes easy, well-specified tasks",
       "command": "opencode",
+      "version_cmd": [
+        "opencode",
+        "--version"
+      ],
+      "latest_cmd": [
+        "npm",
+        "view",
+        "@opencode/cli",
+        "version"
+      ],
+      "update_cmd": "opencode upgrade",
       "model": "opencode/big-pickle",
       "timeout_seconds": 300,
       "extra_args": [],
@@ -140,6 +168,17 @@
       "enabled": true,
       "description": "Full gentle-ai stack on pi; executes tasks that need real thinking; explicit use only (-a gentle-shell), never in tiers",
       "command": "gentle-shell",
+      "version_cmd": [
+        "gentle-shell",
+        "--version"
+      ],
+      "latest_cmd": [
+        "npm",
+        "view",
+        "gentle-pi",
+        "version"
+      ],
+      "update_cmd": "gentle-shell upgrade",
       "model": "openai-codex/gpt-6.2-sol",
       "timeout_seconds": 1800,
       "extra_args": [],
@@ -157,11 +196,24 @@
     "claude": {
       "enabled": true,
       "command": "claude",
+      "version_cmd": [
+        "claude",
+        "--version"
+      ],
+      "latest_cmd": [
+        "npm",
+        "view",
+        "@anthropic-ai/claude-code",
+        "version"
+      ],
+      "update_cmd": "claude update",
       "model": null,
       "timeout_seconds": 600,
       "extra_args": [],
       "args": [
         "-p",
+        "--output-format",
+        "json",
         "{model_args}",
         "{extra_args}",
         "{prompt}"
@@ -170,7 +222,7 @@
         "--model",
         "{model}"
       ],
-      "output": "text",
+      "output": "claude-json",
       "models": [
         "haiku",
         "sonnet",

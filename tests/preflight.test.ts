@@ -1,0 +1,124 @@
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test, type TestContext } from "node:test";
+import { fixture, runCli, scratchConfig } from "./fixtures/helpers.ts";
+
+const stub = fixture("stub-preflight");
+const update = `${stub} update`;
+const agent = {
+  enabled: true, command: stub, version_cmd: [stub, "version"], latest_cmd: [stub, "latest"],
+  update_cmd: update, models: ["model-3"], list_models: { cmd: [stub, "models"], parse: "tsv" },
+};
+const modelsLine = "  models: 2 usable, 1 unavailable, 0 out_of_quota, 0 unverified\n";
+const benchmarks = { max_age_days: 7, sources: [{ id: "demo", url: "https://example.invalid", parse: "models-dev" }] };
+
+function setup(t: TestContext, config: object) {
+  const scratch = scratchConfig(config);
+  const { root } = scratch;
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const marker = join(root, "calls");
+  const dir = join(scratch.env.XDG_CACHE_HOME!, "multi-agent-router");
+  mkdirSync(dir);
+  const env = { ...scratch.env, ASK_AGENT_POLICY: join(root, "config", "absent.json"), STUB_MARKER: marker,
+    STUB_INSTALLED: "tool 1.9.0 (engine 99.0.0)", STUB_LATEST: "1.9.0", STUB_OFFLINE: "0", STUB_DELAY: "0" };
+  const original = snapshot();
+  function snapshot() {
+    return Object.fromEntries(readdirSync(root, { recursive: true, withFileTypes: true })
+      .filter((item) => item.parentPath !== dir && item.name !== "calls")
+      .map((item) => {
+        const path = join(item.parentPath, item.name);
+        return [path, item.isDirectory() ? "directory" : readFileSync(path, "utf8")];
+      }));
+  }
+  function checkState(calls: string[], catalog: Record<string, unknown> | null, benchmarkCache?: string) {
+    assert.deepEqual(snapshot(), original);
+    assert.deepEqual(existsSync(marker) ? readFileSync(marker, "utf8").trim().split("\n").sort() : [], calls.sort());
+    assert.deepEqual(readdirSync(dir).sort(), [...(benchmarkCache === undefined ? [] : ["benchmarks.json"]), ...(catalog ? ["catalog.json"] : [])]);
+    if (catalog) {
+      const actual = JSON.parse(readFileSync(join(dir, "catalog.json"), "utf8"));
+      for (const value of Object.values(actual.agents) as Array<{ fetched_at: string }>) {
+        assert.equal(new Date(value.fetched_at).toISOString(), value.fetched_at);
+        Reflect.deleteProperty(value, "fetched_at");
+      }
+      assert.deepEqual(actual, { agents: catalog });
+    }
+    if (benchmarkCache !== undefined) assert.equal(readFileSync(join(dir, "benchmarks.json"), "utf8"), benchmarkCache);
+  }
+  return { env, dir, checkState };
+}
+
+const listed = { source: "cli", models: [
+  { id: "model-1", status: "usable" }, { id: "model-2", status: "usable" },
+  { id: "model-3", status: "unavailable", reason: "not listed by one" },
+] };
+const calls = ["version", "latest", "models"];
+
+for (const [latest, status, exit] of [["1.9.0", "current", 0], ["1.10.0", "outdated", 3]] as const) {
+  test(`preflight ${status}, reporting only`, (t) => {
+    const s = setup(t, { agents: { one: agent, disabled: { ...agent, enabled: false } } });
+    assert.deepEqual(runCli(["preflight"], { ...s.env, STUB_LATEST: latest }), {
+      status: exit, stderr: "", stdout: `one  version 1.9.0 (latest ${latest}, ${status})\n${modelsLine}` +
+        (exit ? `  update: ${update}\n` : "") + `benchmarks: not configured\npreflight: ${exit ? "outdated" : "ready"}\n`,
+    });
+    s.checkState([...calls], { one: listed });
+  });
+}
+
+for (const offline of [false, true]) {
+  test(`preflight unknown with ${offline ? "failed latest lookup" : "null latest_cmd"}, including agy quota`, (t) => {
+    const s = setup(t, { agents: { agy: { ...agent, latest_cmd: offline ? agent.latest_cmd : null,
+      models: ["model-4"], quota_groups: { "model-1": "family" }, quota: { min_remaining: 0.5 } } } });
+    const expected = { agents: { agy: {
+      version: { installed: "1.9.0", latest: null, status: "unknown", update_cmd: update },
+      quota: 0.25, models: { usable: 1, unavailable: 1, out_of_quota: 1, unverified: 0 },
+    } }, benchmarks: "not configured" };
+    assert.deepEqual(runCli(["preflight", "--json"], { ...s.env, STUB_OFFLINE: offline ? "1" : "0" }), {
+      status: 0, stderr: "", stdout: `${JSON.stringify(expected, null, 2)}\n`,
+    });
+    s.checkState(["version", "models", "-p /usage --output-format json --print-timeout 30s", ...(offline ? ["latest"] : [])], { agy: {
+      source: "cli", models: [{ id: "model-1", status: "out_of_quota", quota_group: "family", quota_left: 0.25 },
+        { id: "model-2", status: "usable" }, { id: "model-4", status: "unavailable", reason: "not listed by agy" }],
+    } });
+  });
+}
+
+test("preflight fails if no catalog can be built", (t) => {
+  const s = setup(t, { agents: { one: { ...agent, models: [], list_models: { cmd: [stub, "fail"], parse: "tsv" } } } });
+  assert.deepEqual(runCli(["preflight"], s.env), { status: 1, stderr: "",
+    stdout: "one  version 1.9.0 (latest 1.9.0, current)\n  models: 0 usable, 0 unavailable, 0 out_of_quota, 0 unverified\nbenchmarks: not configured\npreflight: failed\n" });
+  s.checkState(["version", "latest", "fail"], { one: { source: "config", models: [] } });
+});
+
+for (const [status, days, exit] of [["fresh", 1, 0], ["stale", 8, 3], ["missing", null, 3]] as const) {
+  test(`preflight reports ${status} benchmarks`, (t) => {
+    const s = setup(t, { agents: { one: agent }, benchmarks });
+    const cache = days === null ? undefined : JSON.stringify({ sources: {
+      demo: { fetched_at: new Date(Date.now() - days * 86_400_000).toISOString() },
+    } });
+    if (cache !== undefined) writeFileSync(join(s.dir, "benchmarks.json"), cache);
+    assert.deepEqual(runCli(["preflight"], s.env), { status: exit, stderr: "",
+      stdout: `one  version 1.9.0 (latest 1.9.0, current)\n${modelsLine}benchmarks: ${status}\npreflight: ${exit ? "outdated" : "ready"}\n` });
+    s.checkState([...calls], { one: listed }, cache);
+  });
+}
+
+test("preflight rejects extra arguments without running checks", (t) => {
+  const s = setup(t, { agents: { one: agent } });
+  assert.deepEqual(runCli(["preflight", "--bad"], s.env), { status: 2, stdout: "",
+    stderr: "[ask-agent] error: usage: ask-agent preflight [--json]\n" });
+  s.checkState([], null);
+});
+
+test("preflight checks five agents concurrently and finishes under 60 seconds", (t) => {
+  const ids = ["one", "two", "three", "four", "five"];
+  const s = setup(t, { agents: Object.fromEntries(ids.map((id) => [id, { ...agent, models: [] }])) });
+  const start = performance.now();
+  const result = runCli(["preflight"], { ...s.env, STUB_DELAY: "2" });
+  const seconds = (performance.now() - start) / 1000;
+  assert.ok(seconds < 9, `expected concurrent checks under 60 s, took ${seconds.toFixed(2)} s`);
+  const lines = "  models: 2 usable, 0 unavailable, 0 out_of_quota, 0 unverified\n";
+  assert.deepEqual(result, { status: 0, stderr: "", stdout: ids.map((id) =>
+    `${id}  version 1.9.0 (latest 1.9.0, current)\n${lines}`).join("") + "benchmarks: not configured\npreflight: ready\n" });
+  s.checkState(ids.flatMap(() => calls), Object.fromEntries(ids.map((id) => [id, { ...listed, models: listed.models.slice(0, 2) }])));
+});

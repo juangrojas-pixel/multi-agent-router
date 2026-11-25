@@ -58,7 +58,7 @@ Besides `enabled`, `command`, `model`, `timeout_seconds`, `extra_args`, `fallbac
 - `args`: argument template with `{prompt}`, `{timeout}` and the insertion points `{model_args}`, `{effort_args}`, `{extra_args}`. Built-in templates exist for `codex`, `agy`, `opencode` and `gentle-shell`; any other agent needs `args`.
 - `model_args`: fragment added when a model is set, for example `["--model", "{model}"]`.
 - `effort_args`: fragment added when an effort is set, for example `["--thinking", "{effort}"]`.
-- `output`: how the answer is read from stdout: `text`, `agy-json` or `opencode-events`.
+- `output`: how the answer is read from stdout: `text`, `agy-json`, `opencode-events` or `claude-json` (Claude Code `-p --output-format json`: answer from `result`, model from `modelUsage`).
 - `models`: models a role may set; absent means any.
 - `effort_levels`: effort levels a role may set; absent or empty means none.
 
@@ -89,7 +89,7 @@ Site-specific text (client guards, confirmation protocols, client preambles) can
 
 ### Run history
 
-Every agent run, successful or not, appends one JSON line to `~/.cache/multi-agent-router/runs.jsonl` (`$XDG_CACHE_HOME` honored): `ts`, `agent`, `tier`, `role` (TypeScript router only), `model`, `cwd`, `exit`, `seconds`, `prompt` (task without the preamble, first 2000 chars), `prompt_chars`, `answer` (first 2000 chars) and `changed_files`. The TypeScript router also records `requested_model` (the `-m` or role model, empty when none), `model_source` (`requested`: the model the router passed), and, when given, `task_id` (`--task ID`) and `reason` (`--reason TEXT`), so each delegated task keeps who ran it, with which model and why.
+Every agent run, successful or not, appends one JSON line to `~/.cache/multi-agent-router/runs.jsonl` (`$XDG_CACHE_HOME` honored): `ts`, `agent`, `tier`, `role` (TypeScript router only), `model`, `cwd`, `exit`, `seconds`, `prompt` (task without the preamble, first 2000 chars), `prompt_chars`, `answer` (first 2000 chars) and `changed_files`. The TypeScript router also records `requested_model` (the `-m` or role model, empty when none), `model_source` (`reported` when the agent's output names the model it ran, which only `claude-json` does; otherwise `requested`, and `model` is the one the router passed), `tokens_in` and `tokens_out` when the output reports usage (`agy-json`, `opencode-events`, `claude-json`; output tokens include thinking/reasoning), and, when given, `task_id` (`--task ID`) and `reason` (`--reason TEXT`), so each delegated task keeps who ran it, with which model and why.
 
 ### Model catalog
 
@@ -103,6 +103,12 @@ Every agent run, successful or not, appends one JSON line to `~/.cache/multi-age
 ```
 
 Parsers: `tsv` (first tab field), `lines-first-field` (first word of lines that look like a model id) and `pi-table` (`pi --list-models` rows, joined as `provider/model`, the form `--model` takes). `quota_groups` maps model ids to agy usage groups by glob, first match wins.
+
+### Preflight
+
+`ask-agent preflight [--json]` checks the installed and latest CLI versions for enabled agents, refreshes the model catalog, and reports model counts by status, the lowest known quota per agent, and benchmark cache freshness. Missing or failed version lookups show `unknown`; benchmark freshness is checked locally, with no benchmark download. Without benchmark configuration, it shows `not configured`.
+
+Preflight reports configured update commands for outdated agents but never runs them. Exit codes: `0` ready, `3` outdated agent or missing/stale benchmark data, `1` failed check, `2` invalid configuration or usage.
 
 ### Choosing the model per task
 

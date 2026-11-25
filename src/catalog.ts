@@ -1,4 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
+import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import type { Agent, Config } from "./config.ts";
 import { agyUsage } from "./run.ts";
 import { readCache, writeCache } from "./state.ts";
@@ -12,6 +14,7 @@ type Model = {
 };
 type AgentCatalog = { fetched_at: string; source: "cli" | "config"; models: Model[] };
 type Catalog = { agents: Record<string, AgentCatalog> };
+const exec = promisify(execFile);
 const cacheName = "catalog.json";
 const usage = "usage: ask-agent catalog [-a AGENT] [--refresh] [--json]";
 
@@ -22,16 +25,20 @@ function listModels(list: Agent["list_models"]): Set<string> | null {
     encoding: "utf8", timeout: (list.timeout_seconds ?? 60) * 1000,
   });
   if (result.error || result.status !== 0) return null;
+  return parseModels(result.stdout, list.parse);
+}
+
+function parseModels(stdout: string, parse: string): Set<string> {
   const ids = new Set<string>();
-  for (const line of result.stdout.split(/\r?\n/)) {
+  for (const line of stdout.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    if (list.parse === "tsv") {
+    if (parse === "tsv") {
       const id = line.split("\t", 1)[0].trim();
       if (id) ids.add(id);
-    } else if (list.parse === "pi-table") {
+    } else if (parse === "pi-table") {
       // `pi --list-models`: "provider  model  context ..." rows; the id pi takes is provider/model.
       const [provider, model, context] = line.trim().split(/\s+/);
-      if (!provider || !model || provider === "provider" || !/^[0-9]+[KM]?$/i.test(context ?? "")) continue;
+      if (!provider || !model || provider === "provider" || !/^[0-9]+(\.[0-9]+)?[KM]?$/i.test(context ?? "")) continue;
       ids.add(`${provider}/${model}`);
     } else {
       const [id, ...columns] = line.trim().split(/\s+/);
@@ -66,13 +73,42 @@ function quotaByGroup(command: string): Map<string, number> {
   return fractions;
 }
 
-function fetchAgent(id: string, agent: Agent): AgentCatalog {
-  const listed = listModels(agent.list_models);
+// Keep the existing synchronous quota reader off the event loop during preflight.
+if (!isMainThread && typeof workerData?.catalogQuotaCommand === "string") {
+  parentPort!.postMessage(quotaByGroup(workerData.catalogQuotaCommand));
+}
+
+function fetchQuota(command: string): Promise<Map<string, number>> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL(import.meta.url), { workerData: { catalogQuotaCommand: command } });
+    worker.once("message", resolve);
+    worker.once("error", reject);
+    worker.once("exit", (code) => reject(new Error(`quota worker exited without a report (${code})`)));
+  });
+}
+
+async function listForPreflight(list: Agent["list_models"]): Promise<Set<string> | null> {
+  if (!list) return null;
+  const [command, ...args] = list.cmd;
+  try {
+    const { stdout } = await exec(command, args, {
+      encoding: "utf8", timeout: Math.min(list.timeout_seconds ?? 60, 45) * 1000, killSignal: "SIGKILL",
+    });
+    return parseModels(stdout, list.parse);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchAgent(id: string, agent: Agent, concurrent: boolean): Promise<AgentCatalog> {
+  const checkQuota = id === "agy" && Object.keys(agent.quota_groups ?? {}).length > 0;
+  const [listed, fractions] = concurrent
+    ? await Promise.all([listForPreflight(agent.list_models), checkQuota ? fetchQuota(agent.command) : new Map<string, number>()])
+    : [listModels(agent.list_models), checkQuota ? quotaByGroup(agent.command) : new Map<string, number>()];
   const patterns = Object.entries(agent.quota_groups ?? {}).map(([glob, group]) => ({
     pattern: new RegExp(`^${glob.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`),
     group,
   }));
-  const fractions = id === "agy" && patterns.length ? quotaByGroup(agent.command) : new Map<string, number>();
   const models = Array.from(new Set([...(listed ?? []), ...(agent.models ?? [])]), (modelId): Model => {
     const model: Model = { id: modelId, status: listed ? "usable" : "unverified" };
     if (listed && !listed.has(modelId)) {
@@ -127,17 +163,30 @@ export async function catalogCommand(config: Config, args: string[]): Promise<nu
     }
   }
   if (selected !== undefined && !Object.hasOwn(config.agents, selected)) return error(`unknown agent: ${selected}`);
+  const result = await buildCatalog(config, { refresh, agent: selected });
+  process.stdout.write(json ? `${JSON.stringify(result, null, 2)}\n` : render(result));
+  return 0;
+}
+
+export async function buildCatalog(config: Config, { refresh, agent: selected, concurrent = false }: {
+  refresh?: boolean; agent?: string; concurrent?: boolean;
+} = {}): Promise<Catalog> {
   const agents = Object.entries(config.agents).filter(([id, agent]) => agent.enabled === true && (!selected || selected === id));
   const cached = readCache<Catalog>(cacheName)?.agents;
   const entries: [string, AgentCatalog][] = [];
-  for (const [id, agent] of agents) {
-    if (refresh || !cached) entries.push([id, fetchAgent(id, agent)]);
-    else if (Object.hasOwn(cached, id)) entries.push([id, cached[id]]);
+  if (refresh || !cached) {
+    if (concurrent) {
+      entries.push(...await Promise.all(agents.map(async ([id, agent]): Promise<[string, AgentCatalog]> =>
+        [id, await fetchAgent(id, agent, true)])));
+    } else {
+      for (const [id, agent] of agents) entries.push([id, await fetchAgent(id, agent, false)]);
+    }
+  } else {
+    for (const [id] of agents) if (Object.hasOwn(cached, id)) entries.push([id, cached[id]]);
   }
   const result: Catalog = { agents: Object.fromEntries(entries) };
   if (refresh || !cached) {
     writeCache(cacheName, selected ? { agents: { ...cached, ...result.agents } } : result);
   }
-  process.stdout.write(json ? `${JSON.stringify(result, null, 2)}\n` : render(result));
-  return 0;
+  return result;
 }

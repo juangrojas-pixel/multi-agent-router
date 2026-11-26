@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { buildCatalog } from "./catalog.ts";
 import type { Agent, Config } from "./config.ts";
-import { readCache } from "./state.ts";
+import { readCache, writeCache } from "./state.ts";
 
 const exec = promisify(execFile);
 
@@ -24,8 +24,37 @@ function compareVersions(installed: string, latest: string): number {
   return index < 0 ? 0 : left[index] < right[index] ? -1 : 1;
 }
 
-async function versionReport(agent: Agent) {
-  const [installed, latest] = await Promise.all([readVersion(agent.version_cmd), readVersion(agent.latest_cmd)]);
+// Latest versions and model lists are checked at most once a day; --refresh checks them now.
+const DAY_MS = 86_400_000;
+const versionsCache = "versions.json";
+type LatestCache = { agents: Record<string, { cmd: string[]; latest: string; checked_at: string }> };
+
+// Reads each agent's latest version, reusing a lookup younger than a day made with the same latest_cmd.
+// Failed lookups are not cached, so they are retried on the next run.
+async function latestVersions(enabled: Array<[string, Agent]>, refresh: boolean): Promise<Record<string, string | null>> {
+  const cache = readCache<LatestCache>(versionsCache)?.agents ?? {};
+  const fresh = (id: string, cmd?: string[] | null) => {
+    const entry = Object.hasOwn(cache, id) ? cache[id] : undefined;
+    const age = Date.now() - Date.parse(entry?.checked_at ?? "");
+    return !refresh && entry && JSON.stringify(entry.cmd) === JSON.stringify(cmd) && age >= 0 && age < DAY_MS ? entry : undefined;
+  };
+  let changed = false;
+  const latest = await Promise.all(enabled.map(async ([id, agent]) => {
+    const hit = fresh(id, agent.latest_cmd);
+    if (hit) return hit.latest;
+    const value = await readVersion(agent.latest_cmd);
+    if (value && agent.latest_cmd) {
+      cache[id] = { cmd: agent.latest_cmd, latest: value, checked_at: new Date().toISOString() };
+      changed = true;
+    }
+    return value;
+  }));
+  if (changed) writeCache(versionsCache, { agents: cache });
+  return Object.fromEntries(enabled.map(([id], i) => [id, latest[i]]));
+}
+
+async function versionReport(agent: Agent, latest: string | null) {
+  const installed = await readVersion(agent.version_cmd);
   const comparison = installed && latest ? compareVersions(installed, latest) : null;
   // Newer than the registry's latest (a prerelease, or a registry that lags) is not behind.
   const status = comparison === null ? "unknown" : comparison === -1 ? "outdated" : "current";
@@ -66,10 +95,10 @@ function runUpdate(command: string, timeoutMs: number): Promise<UpdateResult> {
 }
 
 // Updates outdated agents one at a time: package managers share global state and must not race.
-async function updateOutdated(enabled: Array<[string, Agent]>) {
+async function updateOutdated(enabled: Array<[string, Agent]>, latest: Record<string, string | null>) {
   // ASK_AGENT_UPDATE_TIMEOUT_MS exists for tests; real updates get 10 minutes each.
   const timeoutMs = Number(process.env.ASK_AGENT_UPDATE_TIMEOUT_MS) || 600_000;
-  const versions = await Promise.all(enabled.map(([, agent]) => versionReport(agent)));
+  const versions = await Promise.all(enabled.map(([id, agent]) => versionReport(agent, latest[id])));
   const updates: Record<string, UpdateResult> = {};
   for (const [i, [id]] of enabled.entries()) {
     const { status, update_cmd } = versions[i];
@@ -90,18 +119,23 @@ async function updateOutdated(enabled: Array<[string, Agent]>) {
 export async function preflightCommand(config: Config, args: string[]): Promise<number> {
   const json = args.includes("--json");
   const update = args.includes("--update");
-  if (args.length !== Number(json) + Number(update)) {
-    process.stderr.write("[ask-agent] error: usage: ask-agent preflight [--json] [--update]\n");
+  const refresh = args.includes("--refresh");
+  if (args.length !== Number(json) + Number(update) + Number(refresh)) {
+    process.stderr.write("[ask-agent] error: usage: ask-agent preflight [--json] [--update] [--refresh]\n");
     return 2;
   }
   const enabled = Object.entries(config.agents).filter(([, agent]) => agent.enabled === true);
-  const updates = update ? await updateOutdated(enabled) : null;
-  const [catalog, versions] = await Promise.all([
-    buildCatalog(config, { refresh: true, concurrent: true, keepCached: true }).catch((error: unknown) => {
+  const maxAgeMs = refresh ? undefined : DAY_MS;
+  const catalogRun = () => buildCatalog(config, { refresh: true, concurrent: true, keepCached: true, maxAgeMs })
+    .catch((error: unknown) => {
       process.stderr.write(`[ask-agent] error: could not refresh catalog: ${String(error)}\n`);
       return null;
-    }),
-    Promise.all(enabled.map(([, agent]) => versionReport(agent))),
+    });
+  const latest = await latestVersions(enabled, refresh);
+  const updates = update ? await updateOutdated(enabled, latest) : null;
+  const [catalog, versions] = await Promise.all([
+    catalogRun(),
+    Promise.all(enabled.map(([id, agent]) => versionReport(agent, latest[id]))),
   ]);
   const entries = enabled.map(([id], i) => {
     const models = { usable: 0, unavailable: 0, out_of_quota: 0, unverified: 0 };

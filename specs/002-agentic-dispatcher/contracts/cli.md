@@ -19,10 +19,12 @@ sources: models-dev 2026-11-25, lmarena 2026-11-22
 `--json`: the `catalog.json` shape merged with benchmark profiles.
 Exit: 0 answered (even if some agents are unverified); 2 config error.
 
-## `ask-agent preflight [--json] [--update]`
+## `ask-agent preflight [--json] [--update] [--refresh]`
 
 Reports per agent: installed vs latest version and update command, quota, model counts by
-status, benchmark freshness. Without `--update` it changes nothing.
+status, benchmark freshness. Without `--update` it changes no agent. Latest versions
+(`versions.json`) and model lists (`catalog.json`) are reused for 24 hours; installed versions and
+agy quota are always read live. `--refresh` checks latest versions and model lists now.
 
 `--update` first runs `update_cmd` through `sh -c` for each outdated agent, one at a time, with
 the command's output on stderr, then reports as usual. An outdated agent with no `update_cmd` is

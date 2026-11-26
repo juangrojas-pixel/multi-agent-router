@@ -97,11 +97,15 @@ function fetchQuota(command: string): Promise<Map<string, number>> {
   });
 }
 
-async function fetchAgent(id: string, agent: Agent, concurrent: boolean): Promise<AgentCatalog> {
+// A recent CLI listing can be reused instead of listing again. Quota is always read live: it moves within the day.
+async function fetchAgent(id: string, agent: Agent, concurrent: boolean, recent?: AgentCatalog): Promise<AgentCatalog> {
   const checkQuota = id === "agy" && Object.keys(agent.quota_groups ?? {}).length > 0;
+  const list = async () => recent
+    ? new Set(recent.models.filter(({ status }) => status !== "unavailable").map(({ id: modelId }) => modelId))
+    : listModels(agent.list_models);
   const [listed, fractions] = concurrent
-    ? await Promise.all([listModels(agent.list_models), checkQuota ? fetchQuota(agent.command) : new Map<string, number>()])
-    : [await listModels(agent.list_models), checkQuota ? await fetchQuota(agent.command) : new Map<string, number>()];
+    ? await Promise.all([list(), checkQuota ? fetchQuota(agent.command) : new Map<string, number>()])
+    : [await list(), checkQuota ? await fetchQuota(agent.command) : new Map<string, number>()];
   const patterns = Object.entries(agent.quota_groups ?? {}).map(([glob, group]) => ({
     pattern: new RegExp(`^${glob.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`),
     group,
@@ -125,7 +129,7 @@ async function fetchAgent(id: string, agent: Agent, concurrent: boolean): Promis
     }
     return model;
   });
-  return { fetched_at: new Date().toISOString(), source: listed ? "cli" : "config", models };
+  return { fetched_at: recent?.fetched_at ?? new Date().toISOString(), source: listed ? "cli" : "config", models };
 }
 
 function render(catalog: Catalog, sources?: BenchmarkCache["sources"]): string {
@@ -178,20 +182,26 @@ export async function catalogCommand(config: Config, args: string[]): Promise<nu
   return 0;
 }
 
-export async function buildCatalog(config: Config, { refresh, agent: selected, concurrent = false, keepCached = false }: {
-  refresh?: boolean; agent?: string; concurrent?: boolean; keepCached?: boolean;
+// maxAgeMs: on refresh, reuse a CLI listing younger than this instead of listing the agent again.
+export async function buildCatalog(config: Config, { refresh, agent: selected, concurrent = false, keepCached = false, maxAgeMs }: {
+  refresh?: boolean; agent?: string; concurrent?: boolean; keepCached?: boolean; maxAgeMs?: number;
 } = {}): Promise<Catalog> {
   const agents = Object.entries(config.agents).filter(([id, agent]) => agent.enabled === true && (!selected || selected === id));
   const cached = readCache<Catalog>(cacheName)?.agents;
+  const recent = (id: string) => {
+    const entry = cached && Object.hasOwn(cached, id) ? cached[id] : undefined;
+    const age = Date.now() - Date.parse(entry?.fetched_at ?? "");
+    return maxAgeMs !== undefined && entry?.source === "cli" && age >= 0 && age < maxAgeMs ? entry : undefined;
+  };
   const entries: [string, AgentCatalog][] = [];
   let updated = false;
   if (refresh || !cached) {
     const fetched: [string, AgentCatalog][] = concurrent
       ? await Promise.all(agents.map(async ([id, agent]): Promise<[string, AgentCatalog]> =>
-        [id, await fetchAgent(id, agent, true)]))
+        [id, await fetchAgent(id, agent, true, recent(id))]))
       : [];
     if (!concurrent) {
-      for (const [id, agent] of agents) fetched.push([id, await fetchAgent(id, agent, false)]);
+      for (const [id, agent] of agents) fetched.push([id, await fetchAgent(id, agent, false, recent(id))]);
     }
     for (const [id, entry] of fetched) {
       if (keepCached && entry.source !== "cli" && cached && Object.hasOwn(cached, id) && cached[id].source === "cli") {

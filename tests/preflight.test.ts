@@ -34,7 +34,8 @@ function setup(t: TestContext, config: object) {
   function checkState(calls: string[], catalog: Record<string, unknown> | null, benchmarkCache?: string) {
     assert.deepEqual(snapshot(), original);
     assert.deepEqual(existsSync(marker) ? readFileSync(marker, "utf8").trim().split("\n").sort() : [], calls.sort());
-    assert.deepEqual(readdirSync(dir).sort(), [...(benchmarkCache === undefined ? [] : ["benchmarks.json"]), ...(catalog ? ["catalog.json"] : [])]);
+    // versions.json holds the cached latest versions; the daily-cache tests check it directly.
+    assert.deepEqual(readdirSync(dir).filter((name) => name !== "versions.json").sort(), [...(benchmarkCache === undefined ? [] : ["benchmarks.json"]), ...(catalog ? ["catalog.json"] : [])]);
     if (catalog) {
       const actual = JSON.parse(readFileSync(join(dir, "catalog.json"), "utf8"));
       for (const value of Object.values(actual.agents) as Array<{ fetched_at: string }>) {
@@ -107,7 +108,7 @@ for (const [status, days, exit] of [["fresh", 1, 0], ["stale", 8, 3], ["missing"
 test("preflight rejects extra arguments without running checks", (t) => {
   const s = setup(t, { agents: { one: agent } });
   assert.deepEqual(runCli(["preflight", "--bad"], s.env), { status: 2, stdout: "",
-    stderr: "[ask-agent] error: usage: ask-agent preflight [--json] [--update]\n" });
+    stderr: "[ask-agent] error: usage: ask-agent preflight [--json] [--update] [--refresh]\n" });
   s.checkState([], null);
 });
 
@@ -130,7 +131,7 @@ test("preflight keeps the cached model list when an agent lists no models", (t) 
   const s = setup(t, { agents: { one: agent } });
   const report = `one  version 1.9.0 (latest 1.9.0, current)\n${modelsLine}benchmarks: not configured\npreflight: ready\n`;
   assert.deepEqual(runCli(["preflight"], s.env), { status: 0, stderr: "", stdout: report });
-  assert.deepEqual(runCli(["preflight"], { ...s.env, STUB_MODELS_EMPTY: "1" }), { status: 0, stderr: "", stdout: report });
+  assert.deepEqual(runCli(["preflight", "--refresh"], { ...s.env, STUB_MODELS_EMPTY: "1" }), { status: 0, stderr: "", stdout: report });
   s.checkState([...calls, ...calls], { one: listed });
 });
 
@@ -154,7 +155,7 @@ for (const fail of [false, true]) {
         `two  version 1.9.0 (latest unknown, unknown)\n${modelsLine}` +
         `benchmarks: not configured\npreflight: ${fail ? "outdated" : "ready"}\n`,
     });
-    s.checkState(["version one", "latest", "version two", "update one", "version one", "latest", "version two", "models", "models"],
+    s.checkState(["version one", "latest", "version two", "update one", "version one", "version two", "models", "models"],
       { one: listed, two: otherModels("two") });
   });
 }
@@ -173,7 +174,7 @@ test("preflight --update with everything current runs no update", (t) => {
   const s = setup(t, { agents: { one: agent } });
   assert.deepEqual(runCli(["preflight", "--update"], s.env), { status: 0, stderr: "",
     stdout: `one  version 1.9.0 (latest 1.9.0, current)\n${modelsLine}benchmarks: not configured\npreflight: ready\n` });
-  s.checkState(["version", "latest", ...calls], { one: listed });
+  s.checkState(["version", ...calls], { one: listed });
 });
 
 test("preflight --update names an outdated agent without update_cmd and skips it", (t) => {
@@ -182,7 +183,7 @@ test("preflight --update names an outdated agent without update_cmd and skips it
   assert.equal(result.status, 3);
   assert.equal(result.stderr, "[ask-agent] one is outdated but has no update_cmd\n");
   assert.deepEqual(JSON.parse(result.stdout).updates, {});
-  s.checkState(["version", "latest", ...calls], { one: listed });
+  s.checkState(["version", ...calls], { one: listed });
 });
 
 test("preflight --update exits 3 when an update fails even if the agent reads current", (t) => {
@@ -201,4 +202,66 @@ test("preflight --update kills a hung update with its whole process group and sa
   assert.deepEqual(JSON.parse(result.stdout).updates, { one: { command: update, exit: 124, timed_out: true } });
   await new Promise((resolve) => setTimeout(resolve, 2500));
   assert.equal(existsSync(join(s.env.STUB_MARKER!, "..", "calls.late")), false, "a descendant of the update outlived the timeout");
+});
+
+// Latest versions and model lists are cached for a day: a second preflight only re-reads installed
+// versions (and agy quota, which changes within the day). --refresh or a day-old cache checks everything.
+const report = `one  version 1.9.0 (latest 1.9.0, current)\n${modelsLine}benchmarks: not configured\npreflight: ready\n`;
+
+test("preflight reuses latest versions and model lists checked within a day", (t) => {
+  const s = setup(t, { agents: { one: agent } });
+  assert.deepEqual(runCli(["preflight"], s.env), { status: 0, stderr: "", stdout: report });
+  const catalog = readFileSync(join(s.dir, "catalog.json"), "utf8");
+  assert.deepEqual(runCli(["preflight"], s.env), { status: 0, stderr: "", stdout: report });
+  assert.equal(readFileSync(join(s.dir, "catalog.json"), "utf8"), catalog, "a cached listing keeps its original date");
+  s.checkState([...calls, "version"], { one: listed });
+  const versions = JSON.parse(readFileSync(join(s.dir, "versions.json"), "utf8"));
+  assert.deepEqual(Object.keys(versions.agents), ["one"]);
+  assert.equal(versions.agents.one.latest, "1.9.0");
+  assert.deepEqual(versions.agents.one.cmd, agent.latest_cmd);
+});
+
+test("preflight still reads agy quota live when its model list is cached", (t) => {
+  const s = setup(t, { agents: { agy: { ...agent, quota_groups: { "model-1": "family" }, quota: { min_remaining: 0.5 } } } });
+  runCli(["preflight"], s.env);
+  const result = runCli(["preflight", "--json"], s.env);
+  assert.equal(result.status, 0);
+  assert.equal(JSON.parse(result.stdout).agents.agy.quota, 0.25);
+  const usage = "-p /usage --output-format json --print-timeout 30s";
+  assert.deepEqual(readFileSync(s.env.STUB_MARKER!, "utf8").trim().split("\n").sort(),
+    [...calls, usage, "version", usage].sort());
+});
+
+test("preflight --refresh checks latest versions and model lists again", (t) => {
+  const s = setup(t, { agents: { one: agent } });
+  runCli(["preflight"], s.env);
+  assert.deepEqual(runCli(["preflight", "--refresh"], s.env), { status: 0, stderr: "", stdout: report });
+  s.checkState([...calls, ...calls], { one: listed });
+});
+
+test("preflight checks again when the cache is a day old", (t) => {
+  const s = setup(t, { agents: { one: agent } });
+  runCli(["preflight"], s.env);
+  const old = new Date(Date.now() - 25 * 3_600_000).toISOString();
+  for (const name of ["catalog.json", "versions.json"]) {
+    const path = join(s.dir, name);
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    for (const entry of Object.values(value.agents) as Array<Record<string, unknown>>) {
+      entry[name === "catalog.json" ? "fetched_at" : "checked_at"] = old;
+    }
+    writeFileSync(path, JSON.stringify(value));
+  }
+  assert.deepEqual(runCli(["preflight"], s.env), { status: 0, stderr: "", stdout: report });
+  s.checkState([...calls, ...calls], { one: listed });
+});
+
+test("preflight checks the latest version again when latest_cmd changed", (t) => {
+  const s = setup(t, { agents: { one: agent } });
+  runCli(["preflight"], s.env);
+  const path = join(s.dir, "versions.json");
+  const value = JSON.parse(readFileSync(path, "utf8"));
+  value.agents.one.cmd = [stub, "other"];
+  writeFileSync(path, JSON.stringify(value));
+  assert.deepEqual(runCli(["preflight"], s.env), { status: 0, stderr: "", stdout: report });
+  s.checkState([...calls, "version", "latest"], { one: listed });
 });
